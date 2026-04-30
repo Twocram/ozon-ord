@@ -1,0 +1,13 @@
+{
+  "rows": [
+    {
+      "row_number": 2,
+      "creative_id": "2W5zFJbRAnD",
+      "channel_url": "https://t.me/sofinnkaabounzxc",
+      "platform_error": "Не найдено"
+    }
+  ],
+  "errors": [
+    "Platform not found: externalPlatformId=t_me_sofinnkaabounzxc_6fcd12f975"
+  ]
+}
