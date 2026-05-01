@@ -14,8 +14,10 @@ from sheets_reader import DEFAULT_SHEET_URL, parse_sheet, rows_to_json, validate
 from sync_service import (
     build_platform_error_rows,
     build_sync_batch,
+    extract_statistic_creation_errors,
     resolve_admin_statistics,
     save_platform_errors,
+    split_resolution_errors,
     sync_batch,
 )
 
@@ -114,12 +116,38 @@ def sync(sheet_url: str, send: bool) -> int:
 
     external_client = ExternalOzonOrdClient.from_env()
     admin_client = AdminOzonOrdClient.from_env()
+    resolved_statistics, resolution_errors = resolve_admin_statistics(external_client, batch)
+    non_blocking_resolution_errors, blocking_resolution_errors = split_resolution_errors(
+        resolution_errors
+    )
+    if non_blocking_resolution_errors:
+        save_platform_errors(rows, resolution_errors)
+        apps_script_client = AppsScriptClient.from_env()
+        if apps_script_client is not None:
+            apps_script_client.update_platform_errors(
+                build_platform_error_rows(rows, non_blocking_resolution_errors)
+            )
+    if blocking_resolution_errors:
+        raise OzonOrdApiError("\n".join(blocking_resolution_errors))
+
     try:
-        response = sync_batch(external_client, admin_client, batch)
+        response = sync_batch(
+            external_client,
+            admin_client,
+            batch,
+            resolved_statistics=resolved_statistics,
+        )
     except OzonOrdApiError as error:
         message = str(error)
-        if "Platform not found:" in message:
-            errors = message.splitlines()
+        errors = message.splitlines()
+        statistic_errors = extract_statistic_creation_errors(message, resolved_statistics)
+        if statistic_errors:
+            errors = statistic_errors
+        if errors and (
+            "Platform not found:" in message
+            or "Platform matched more than one:" in message
+            or statistic_errors
+        ):
             save_platform_errors(rows, errors)
             apps_script_client = AppsScriptClient.from_env()
             if apps_script_client is not None:
@@ -127,6 +155,8 @@ def sync(sheet_url: str, send: bool) -> int:
                     build_platform_error_rows(rows, errors)
                 )
         raise
+    if non_blocking_resolution_errors:
+        response["resolution_errors"] = non_blocking_resolution_errors
     print(json.dumps(response, ensure_ascii=False, indent=2, default=str))
     return 0
 

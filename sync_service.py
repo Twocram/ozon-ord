@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ozon_ord_api import AdminOzonOrdClient, ExternalOzonOrdClient, OzonOrdApiError
 from ozon_ord_mapping import (
@@ -130,14 +132,16 @@ def sync_batch(
     external_client: ExternalOzonOrdClient,
     admin_client: AdminOzonOrdClient,
     batch: SyncBatch,
+    resolved_statistics: list[ResolvedStatisticPayload] | None = None,
 ) -> dict[str, object]:
     statistic_response = None
 
-    resolved_statistics, resolution_errors = resolve_admin_statistics(
-        external_client, batch
-    )
-    if resolution_errors:
-        raise OzonOrdApiError("\n".join(resolution_errors))
+    if resolved_statistics is None:
+        resolved_statistics, resolution_errors = resolve_admin_statistics(
+            external_client, batch
+        )
+        if resolution_errors:
+            raise OzonOrdApiError("\n".join(resolution_errors))
 
     if resolved_statistics:
         statistic_response = admin_client.add_statistics(
@@ -255,10 +259,13 @@ def build_platform_error_rows(rows: list[ParsedRow], errors: list[str]) -> list[
 
 def build_platform_error_payload(rows: list[ParsedRow], errors: list[str]) -> dict[str, object]:
     error_by_external_platform_id: dict[str, str] = {}
+    error_by_row_number: dict[int, str] = {}
     for error in errors:
-        if error.startswith("Platform not found: "):
+        if row_error := _parse_row_error(error):
+            error_by_row_number[row_error[0]] = row_error[1]
+        elif error.startswith("Platform not found: "):
             external_id = _normalize_platform_error_external_id(error.split(": ", 1)[1])
-            error_by_external_platform_id[external_id] = "Не найдено"
+            error_by_external_platform_id[external_id] = "Площака не найдена"
         elif error.startswith("Platform matched more than one: "):
             external_id = _normalize_platform_error_external_id(error.split(": ", 1)[1])
             error_by_external_platform_id[external_id] = "Найдено больше одной"
@@ -269,11 +276,15 @@ def build_platform_error_payload(rows: list[ParsedRow], errors: list[str]) -> di
                 "row_number": row.row_number,
                 "creative_id": row.creative_id,
                 "channel_url": row.channel_url,
-                "platform_error": error_by_external_platform_id[_row_external_platform_id(row)],
+                "platform_error": error_by_row_number.get(row.row_number)
+                or error_by_external_platform_id[_row_external_platform_id(row)],
             }
             for row in rows
-            if row.channel_url is not None
-            and _row_external_platform_id(row) in error_by_external_platform_id
+            if row.row_number in error_by_row_number
+            or (
+                row.channel_url is not None
+                and _row_external_platform_id(row) in error_by_external_platform_id
+            )
         ],
         "errors": errors,
     }
@@ -291,3 +302,137 @@ def _normalize_platform_error_external_id(value: str) -> str:
     if value.startswith(prefix):
         return value[len(prefix):]
     return value
+
+
+def extract_statistic_creation_errors(
+    error_message: str,
+    resolved_statistics: list[ResolvedStatisticPayload],
+) -> list[str]:
+    duplicate_message = "Статистика уже создана"
+    if duplicate_message not in error_message:
+        return []
+
+    row_numbers: set[int] = set()
+    indexed_rows = {
+        index: item.row_number for index, item in enumerate(resolved_statistics)
+    }
+    creative_rows = {
+        item.payload.creativeId: item.row_number for item in resolved_statistics
+    }
+
+    payload = _extract_json_payload_from_error_message(error_message)
+    if payload is not None:
+        for entry in _collect_duplicate_statistic_entries(payload):
+            row_number = (
+                entry.get("row_number")
+                or indexed_rows.get(entry.get("index"))
+                or creative_rows.get(entry.get("creative_id"))
+            )
+            if row_number:
+                row_numbers.add(row_number)
+
+    if not row_numbers and len(resolved_statistics) == 1:
+        row_numbers.add(resolved_statistics[0].row_number)
+
+    return [f"Row {row_number}: {duplicate_message}" for row_number in sorted(row_numbers)]
+
+
+def split_resolution_errors(errors: list[str]) -> tuple[list[str], list[str]]:
+    non_blocking_prefixes = (
+        "Platform not found: ",
+        "Platform matched more than one: ",
+    )
+    non_blocking: list[str] = []
+    blocking: list[str] = []
+
+    for error in errors:
+        if error.startswith(non_blocking_prefixes):
+            non_blocking.append(error)
+        else:
+            blocking.append(error)
+
+    return non_blocking, blocking
+
+
+def _parse_row_error(error: str) -> tuple[int, str] | None:
+    match = re.match(r"^Row (\d+): (.+)$", error)
+    if not match:
+        return None
+    return int(match.group(1)), match.group(2)
+
+
+def _extract_json_payload_from_error_message(error_message: str) -> Any | None:
+    for start_char in ("{", "["):
+        start = error_message.find(start_char)
+        if start == -1:
+            continue
+        try:
+            return json.loads(error_message[start:])
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _collect_duplicate_statistic_entries(payload: Any) -> list[dict[str, Any]]:
+    collected: list[dict[str, Any]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            messages = [
+                value
+                for key, value in node.items()
+                if key in {"message", "error", "detail", "description", "text"}
+                and isinstance(value, str)
+            ]
+            if any("Статистика уже создана" in message for message in messages):
+                collected.append(
+                    {
+                        "index": _extract_index_from_node(node),
+                        "creative_id": _extract_creative_id_from_node(node),
+                        "row_number": _extract_row_number_from_node(node),
+                    }
+                )
+
+            for value in node.values():
+                walk(value)
+            return
+
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return collected
+
+
+def _extract_index_from_node(node: dict[str, Any]) -> int | None:
+    direct_index = node.get("index")
+    if isinstance(direct_index, int):
+        return direct_index
+
+    for key in ("path", "field", "name"):
+        value = node.get(key)
+        if not isinstance(value, str):
+            continue
+        match = re.search(r"statistics\[(\d+)\]", value)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _extract_creative_id_from_node(node: dict[str, Any]) -> str | None:
+    for key in ("creativeId", "creative_id", "externalCreativeId", "marker"):
+        value = node.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _extract_row_number_from_node(node: dict[str, Any]) -> int | None:
+    for key in ("rowNumber", "row_number"):
+        value = node.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    return None
