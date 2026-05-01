@@ -4,11 +4,10 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlparse
 
 from sheets_reader import ParsedRow
-
 
 DEFAULT_CAMPAIGN_TYPE = "Иное"
 DEFAULT_VAT_RATE_LABEL = "Без НДС"
@@ -98,7 +97,9 @@ def map_row_to_ozon_ord_payload(row: ParsedRow) -> OzonOrdPayload:
 
     if missing:
         joined = ", ".join(missing)
-        raise ValueError(f"Row {row.row_number}: missing required mapping fields: {joined}")
+        raise ValueError(
+            f"Row {row.row_number}: missing required mapping fields: {joined}"
+        )
 
     display_start_date = row.publication_date
     display_end_date = row.publication_date + timedelta(days=1)
@@ -123,7 +124,9 @@ def map_row_to_ozon_ord_payload(row: ParsedRow) -> OzonOrdPayload:
 
 def build_platform_payload(row: ParsedRow) -> OzonOrdPlatformPayload:
     if row.channel_url is None:
-        raise ValueError(f"Row {row.row_number}: missing channel_url for platform payload")
+        raise ValueError(
+            f"Row {row.row_number}: missing channel_url for platform payload"
+        )
 
     return OzonOrdPlatformPayload(
         externalPlatformId=build_external_platform_id(row.channel_url),
@@ -201,7 +204,9 @@ def payloads_to_json(payloads: list[OzonOrdPayload], limit: int = 3) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2, default=str)
 
 
-def platform_payloads_to_json(payloads: list[OzonOrdPlatformPayload], limit: int = 3) -> str:
+def platform_payloads_to_json(
+    payloads: list[OzonOrdPlatformPayload], limit: int = 3
+) -> str:
     data = [asdict(payload) for payload in payloads[:limit]]
     return json.dumps(data, ensure_ascii=False, indent=2, default=str)
 
