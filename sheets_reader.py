@@ -16,6 +16,7 @@ DEFAULT_SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/"
     "1PuvoA3GcHIger8bXYR0uY_jIhj_3LZ7ieypF1IcGcIw/edit?gid=0#gid=0"
 )
+TARGET_EXECUTOR = "100б"
 
 
 @dataclass
@@ -26,12 +27,13 @@ class ParsedRow:
     platform: str | None
     creative_id: str | None
     channel_url: str | None
+    executor: str | None
     contractor: str | None
     price_with_tax: Decimal | None
     publication_date: date | None
     reach: int | None
     mark: str | None
-    platform_error: str | None
+    error: str | None
     raw: dict[str, Any]
 
 
@@ -90,15 +92,22 @@ def parse_sheet(sheet_url: str = DEFAULT_SHEET_URL) -> tuple[list[str], list[Par
                 row_number=offset,
                 manager=text_or_none(raw_row.get("manager")),
                 month=parse_date(raw_row.get("month")),
-                platform=text_or_none(raw_row.get("platform")),
+                platform=text_or_none(raw_row.get("platform") or raw_row.get("ploschadka")),
                 creative_id=text_or_none(raw_row.get("creative")),
-                channel_url=text_or_none(raw_row.get("channel_url")),
+                channel_url=text_or_none(
+                    raw_row.get("channel_url")
+                    or raw_row.get("platform")
+                    or raw_row.get("ploschadka")
+                ),
+                executor=text_or_none(raw_row.get("executor")),
                 contractor=text_or_none(raw_row.get("contractor")),
-                price_with_tax=parse_decimal(raw_row.get("price_with_tax")),
+                price_with_tax=parse_decimal(
+                    raw_row.get("price_with_tax") or raw_row.get("tsena")
+                ),
                 publication_date=parse_date(raw_row.get("publication_date")),
                 reach=parse_int(raw_row.get("reach")),
                 mark=text_or_none(raw_row.get("mark")),
-                platform_error=text_or_none(raw_row.get("platform_error")),
+                error=text_or_none(raw_row.get("error") or raw_row.get("platform_error")),
                 raw=raw_row,
             )
         )
@@ -112,13 +121,17 @@ def normalize_header(header: list[str]) -> list[str]:
         "mesyats": "month",
         "sotsset": "platform",
         "kreativ": "creative",
+        "ploschadka": "channel_url",
         "ssylka_na_kanal": "channel_url",
+        "ispolnitel": "executor",
         "k_a": "contractor",
+        "tsena": "price_with_tax",
         "tsena_s_nalogom": "price_with_tax",
         "data_vyhoda": "publication_date",
         "ohvat": "reach",
         "mark": "mark",
-        "oshibka_ploshchadki": "platform_error",
+        "oshibka": "error",
+        "oshibka_ploshchadki": "error",
     }
 
     normalized: list[str] = []
@@ -229,6 +242,17 @@ def rows_to_json(rows: list[ParsedRow], limit: int = 3) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
+def filter_rows_for_processing(
+    rows: list[ParsedRow], target_executor: str = TARGET_EXECUTOR
+) -> list[ParsedRow]:
+    target = _normalize_executor_value(target_executor)
+    return [
+        row
+        for row in rows
+        if _normalize_executor_value(row.executor) == target
+    ]
+
+
 def validate_rows(rows: list[ParsedRow]) -> list[RowIssue]:
     issues: list[RowIssue] = []
     required_fields = {
@@ -264,3 +288,10 @@ def validate_rows(rows: list[ParsedRow]) -> list[RowIssue]:
             issues.append(RowIssue(row_number=row.row_number, messages=messages))
 
     return issues
+
+
+def _normalize_executor_value(value: str | None) -> str | None:
+    text = text_or_none(value)
+    if text is None:
+        return None
+    return re.sub(r"\s+", " ", text).casefold()

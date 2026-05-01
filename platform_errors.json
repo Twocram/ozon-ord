@@ -1,56 +1,16 @@
 {
   "rows": [
     {
-      "row_number": 17,
-      "creative_id": "2W5zFFwRCxZ",
-      "channel_url": "https://t.me/lesyamedd",
-      "platform_error": "Не найдено"
-    },
-    {
-      "row_number": 23,
-      "creative_id": "2W5zFJifhrh",
-      "channel_url": "https://t.me/femceldiary",
-      "platform_error": "Не найдено"
-    },
-    {
-      "row_number": 30,
-      "creative_id": "2W5zFK3wYXB",
-      "channel_url": "https://t.me/bvpolinastyle",
-      "platform_error": "Не найдено"
-    },
-    {
-      "row_number": 43,
-      "creative_id": "2W5zFHXLSWM",
-      "channel_url": "https://t.me/salilimo",
-      "platform_error": "Не найдено"
-    },
-    {
-      "row_number": 55,
-      "creative_id": "2W5zFHYrnAD",
-      "channel_url": "https://t.me/jizajz",
-      "platform_error": "Не найдено"
-    },
-    {
-      "row_number": 56,
-      "creative_id": "2W5zFHhkhrH",
-      "channel_url": "https://t.me/diaivay",
-      "platform_error": "Не найдено"
-    },
-    {
-      "row_number": 65,
-      "creative_id": "Бьюти подружка 👑",
-      "channel_url": "https://t.me/bueauty_tut",
-      "platform_error": "Не найдено"
+      "row_number": 75,
+      "creative_id": "2W5zFHhYxDw",
+      "channel_url": "https://t.me/ada_jef",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
     }
   ],
   "errors": [
-    "Creative marker not found: Бьюти подружка 👑",
-    "Platform not found: externalPlatformId=t_me_lesyamedd_e65f1cff8b",
-    "Platform not found: externalPlatformId=t_me_femceldiary_ecb263b64a",
-    "Platform not found: externalPlatformId=t_me_bvpolinastyle_6a8c3fd730",
-    "Platform not found: externalPlatformId=t_me_salilimo_3560cd6824",
-    "Platform not found: externalPlatformId=t_me_jizajz_7ac9c3b94d",
-    "Platform not found: externalPlatformId=t_me_diaivay_ff3ffd40b0",
-    "Platform not found: externalPlatformId=t_me_bueauty_tut_74646255b4"
+    "Creative marker not found: 2W5zFG95MWZ..",
+    "Creative not found for marker=2W5zFG95MWZ..",
+    "Platform not found: externalPlatformId=t_me_ada_jef_0d5fe33201"
   ]
 }

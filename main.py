@@ -10,14 +10,20 @@ from ozon_ord_mapping import (
     admin_statistic_payloads_to_json,
     statistic_payloads_to_json,
 )
-from sheets_reader import DEFAULT_SHEET_URL, parse_sheet, rows_to_json, validate_rows
+from sheets_reader import (
+    DEFAULT_SHEET_URL,
+    filter_rows_for_processing,
+    parse_sheet,
+    rows_to_json,
+    validate_rows,
+)
 from sync_service import (
     build_platform_error_rows,
     build_sync_batch,
+    extract_duplicate_statistic_row_numbers,
     extract_statistic_creation_errors,
     resolve_admin_statistics,
     save_platform_errors,
-    split_resolution_errors,
     sync_batch,
 )
 
@@ -42,17 +48,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def preview(sheet_url: str, limit: int) -> int:
     header, rows = parse_sheet(sheet_url)
-    issues = validate_rows(rows)
-    batch = build_sync_batch(rows)
+    filtered_rows = filter_rows_for_processing(rows)
+    issues = validate_rows(filtered_rows)
+    batch = build_sync_batch(filtered_rows)
 
     print(f"Columns: {len(header)}")
     print(f"Rows parsed: {len(rows)}")
+    print(f"Rows eligible: {len(filtered_rows)}")
+    print(f"Rows skipped by executor filter: {len(rows) - len(filtered_rows)}")
     print(f"Rows with issues: {len(issues)}")
     print(f"Statistics prepared: {len(batch.statistics)}")
     print(f"Mapping errors: {len(batch.mapping_errors)}")
 
     print("\nSample rows:")
-    print(rows_to_json(rows, limit=limit))
+    print(rows_to_json(filtered_rows, limit=limit))
 
     print("\nSample statistic payloads:")
     print(statistic_payloads_to_json(batch.statistics, limit=limit))
@@ -79,8 +88,10 @@ def probe_api() -> int:
 
 def sync(sheet_url: str, send: bool) -> int:
     _, rows = parse_sheet(sheet_url)
-    batch = build_sync_batch(rows)
+    filtered_rows = filter_rows_for_processing(rows)
+    batch = build_sync_batch(filtered_rows)
 
+    print(f"Rows eligible: {len(filtered_rows)}")
     print(f"Statistics prepared: {len(batch.statistics)}")
     print(f"Mapping errors: {len(batch.mapping_errors)}")
 
@@ -99,7 +110,7 @@ def sync(sheet_url: str, send: bool) -> int:
         print("\nStatistic payload preview:")
         print(statistic_payloads_to_json(batch.statistics, limit=3))
         if resolution_errors:
-            save_platform_errors(rows, resolution_errors)
+            save_platform_errors(filtered_rows, resolution_errors)
             print("\nResolution errors:")
             for error in resolution_errors[:10]:
                 print(error)
@@ -116,47 +127,94 @@ def sync(sheet_url: str, send: bool) -> int:
 
     external_client = ExternalOzonOrdClient.from_env()
     admin_client = AdminOzonOrdClient.from_env()
-    resolved_statistics, resolution_errors = resolve_admin_statistics(external_client, batch)
-    non_blocking_resolution_errors, blocking_resolution_errors = split_resolution_errors(
-        resolution_errors
+    resolved_statistics, resolution_errors = resolve_admin_statistics(
+        external_client, batch
     )
-    if non_blocking_resolution_errors:
-        save_platform_errors(rows, resolution_errors)
+    if resolution_errors:
+        save_platform_errors(filtered_rows, resolution_errors)
         apps_script_client = AppsScriptClient.from_env()
         if apps_script_client is not None:
             apps_script_client.update_platform_errors(
-                build_platform_error_rows(rows, non_blocking_resolution_errors)
+                build_platform_error_rows(filtered_rows, resolution_errors)
             )
-    if blocking_resolution_errors:
-        raise OzonOrdApiError("\n".join(blocking_resolution_errors))
+        raise OzonOrdApiError("\n".join(resolution_errors))
 
+    duplicate_statistic_errors: list[str] = []
+    pending_statistics = resolved_statistics
     try:
-        response = sync_batch(
-            external_client,
-            admin_client,
-            batch,
-            resolved_statistics=resolved_statistics,
-        )
+        while True:
+            response = sync_batch(
+                external_client,
+                admin_client,
+                batch,
+                resolved_statistics=pending_statistics,
+            )
+            break
     except OzonOrdApiError as error:
-        message = str(error)
-        errors = message.splitlines()
-        statistic_errors = extract_statistic_creation_errors(message, resolved_statistics)
-        if statistic_errors:
-            errors = statistic_errors
-        if errors and (
-            "Platform not found:" in message
-            or "Platform matched more than one:" in message
-            or statistic_errors
-        ):
-            save_platform_errors(rows, errors)
+        while True:
+            message = str(error)
+            duplicate_row_numbers = extract_duplicate_statistic_row_numbers(
+                message, pending_statistics
+            )
+            if not duplicate_row_numbers:
+                errors = message.splitlines()
+                if errors and (
+                    "Platform not found:" in message
+                    or "Platform matched more than one:" in message
+                ):
+                    save_platform_errors(filtered_rows, errors)
+                    apps_script_client = AppsScriptClient.from_env()
+                    if apps_script_client is not None:
+                        apps_script_client.update_platform_errors(
+                            build_platform_error_rows(filtered_rows, errors)
+                        )
+                raise
+
+            statistic_errors = extract_statistic_creation_errors(
+                message, pending_statistics
+            )
+            duplicate_statistic_errors.extend(
+                error_text
+                for error_text in statistic_errors
+                if error_text not in duplicate_statistic_errors
+            )
+            save_platform_errors(filtered_rows, duplicate_statistic_errors)
             apps_script_client = AppsScriptClient.from_env()
             if apps_script_client is not None:
                 apps_script_client.update_platform_errors(
-                    build_platform_error_rows(rows, errors)
+                    build_platform_error_rows(
+                        filtered_rows, duplicate_statistic_errors
+                    )
                 )
-        raise
-    if non_blocking_resolution_errors:
-        response["resolution_errors"] = non_blocking_resolution_errors
+
+            skipped_rows = set(duplicate_row_numbers)
+            next_pending_statistics = [
+                item
+                for item in pending_statistics
+                if item.row_number not in skipped_rows
+            ]
+            if len(next_pending_statistics) == len(pending_statistics):
+                raise
+            pending_statistics = next_pending_statistics
+
+            if not pending_statistics:
+                response = {"statistic_response": None}
+                break
+
+            try:
+                response = sync_batch(
+                    external_client,
+                    admin_client,
+                    batch,
+                    resolved_statistics=pending_statistics,
+                )
+                break
+            except OzonOrdApiError as next_error:
+                error = next_error
+                continue
+
+    if duplicate_statistic_errors:
+        response["skipped_errors"] = duplicate_statistic_errors
     print(json.dumps(response, ensure_ascii=False, indent=2, default=str))
     return 0
 

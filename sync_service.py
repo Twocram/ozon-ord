@@ -265,10 +265,10 @@ def build_platform_error_payload(rows: list[ParsedRow], errors: list[str]) -> di
             error_by_row_number[row_error[0]] = row_error[1]
         elif error.startswith("Platform not found: "):
             external_id = _normalize_platform_error_external_id(error.split(": ", 1)[1])
-            error_by_external_platform_id[external_id] = "Площака не найдена"
+            error_by_external_platform_id[external_id] = "Площадка не найдена"
         elif error.startswith("Platform matched more than one: "):
             external_id = _normalize_platform_error_external_id(error.split(": ", 1)[1])
-            error_by_external_platform_id[external_id] = "Найдено больше одной"
+            error_by_external_platform_id[external_id] = "Найдено больше одной площадки"
 
     return {
         "rows": [
@@ -276,6 +276,8 @@ def build_platform_error_payload(rows: list[ParsedRow], errors: list[str]) -> di
                 "row_number": row.row_number,
                 "creative_id": row.creative_id,
                 "channel_url": row.channel_url,
+                "error": error_by_row_number.get(row.row_number)
+                or error_by_external_platform_id[_row_external_platform_id(row)],
                 "platform_error": error_by_row_number.get(row.row_number)
                 or error_by_external_platform_id[_row_external_platform_id(row)],
             }
@@ -308,8 +310,19 @@ def extract_statistic_creation_errors(
     error_message: str,
     resolved_statistics: list[ResolvedStatisticPayload],
 ) -> list[str]:
-    duplicate_message = "Статистика уже создана"
-    if duplicate_message not in error_message:
+    row_numbers = extract_duplicate_statistic_row_numbers(
+        error_message, resolved_statistics
+    )
+    duplicate_message = "Креатив уже есть в базе"
+    return [f"Row {row_number}: {duplicate_message}" for row_number in row_numbers]
+
+
+def extract_duplicate_statistic_row_numbers(
+    error_message: str,
+    resolved_statistics: list[ResolvedStatisticPayload],
+) -> list[int]:
+    duplicate_marker = "Статистика уже создана"
+    if duplicate_marker not in error_message:
         return []
 
     row_numbers: set[int] = set()
@@ -334,7 +347,7 @@ def extract_statistic_creation_errors(
     if not row_numbers and len(resolved_statistics) == 1:
         row_numbers.add(resolved_statistics[0].row_number)
 
-    return [f"Row {row_number}: {duplicate_message}" for row_number in sorted(row_numbers)]
+    return sorted(row_numbers)
 
 
 def split_resolution_errors(errors: list[str]) -> tuple[list[str], list[str]]:

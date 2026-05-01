@@ -7,14 +7,17 @@
 Текущая логика проекта:
 
 1. Скрипт читает Google Sheets по публичной CSV-ссылке.
-2. Для каждой строки ищет площадку в ОЗОН ОРД по URL из `Ссылка на канал`.
-3. Ошибка по площадке фиксируется в двух случаях:
+2. Обрабатывает только строки, где в колонке `Исполнитель` стоит значение `100б`.
+3. Для каждой подходящей строки ищет площадку в ОЗОН ОРД по URL из `Ссылка на канал`.
+4. Ошибка по площадке фиксируется в двух случаях:
    - площадка не найдена;
    - найдено больше одной площадки.
-4. Если площадка найдена ровно одна, скрипт продолжает подготовку статистики.
-5. Если есть ошибки площадок:
+5. Если площадка найдена ровно одна, скрипт продолжает подготовку статистики.
+6. Если статистика по креативу уже есть в базе, в таблицу записывается ошибка `Креатив уже есть в базе`.
+7. Если ошибка связана с площадкой, запросы на создание выходов не отправляются.
+8. Если есть ошибки:
    - они сохраняются в локальный `platform_errors.json`;
-   - если подключён Apps Script, они записываются в колонку `Ошибка площадки`.
+   - если подключён Apps Script, они записываются в колонку `Ошибка`.
 
 ## Что нужно сделать один раз
 
@@ -55,7 +58,7 @@ GOOGLE_APPS_SCRIPT_TIMEOUT=30
 ```javascript
 const SPREADSHEET_ID = '1PuvoA3GcHIger8bXYR0uY_jIhj_3LZ7ieypF1IcGcIw';
 const SHEET_NAME = '';
-const ERROR_COLUMN_NAME = 'Ошибка площадки';
+const ERROR_COLUMN_NAME = 'Ошибка';
 const SCRIPT_TOKEN = '';
 
 function doPost(e) {
@@ -91,7 +94,7 @@ function doPost(e) {
 
     rows.forEach((row) => {
       const rowNumber = Number(row.row_number);
-      const value = row.platform_error || 'Не найдено';
+      const value = row.error || row.platform_error || 'Не найдено';
 
       if (rowNumber >= 2) {
         sheet.getRange(rowNumber, errorColumnIndex).setValue(value);
@@ -171,13 +174,13 @@ Python отправляет в Apps Script JSON такого формата:
       "row_number": 12,
       "creative_id": "2W5zF...",
       "channel_url": "https://t.me/example",
-      "platform_error": "Не найдено"
+      "error": "Площадка не найдена"
     },
     {
       "row_number": 15,
       "creative_id": "2W5zF...",
       "channel_url": "https://t.me/example2",
-      "platform_error": "Найдено больше одной"
+      "error": "Найдено больше одной площадки"
     }
   ]
 }
