@@ -16,6 +16,7 @@ DEFAULT_SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/"
     "1PuvoA3GcHIger8bXYR0uY_jIhj_3LZ7ieypF1IcGcIw/edit?gid=0#gid=0"
 )
+DEFAULT_PLATFORM_SHEET_NAME = "Лист3"
 TARGET_EXECUTOR = "100б"
 
 
@@ -38,18 +39,36 @@ class ParsedRow:
 
 
 @dataclass
+class ParsedPlatformRow:
+    row_number: int
+    name: str | None
+    url: str | None
+    raw: dict[str, Any]
+
+
+@dataclass
 class RowIssue:
     row_number: int
     messages: list[str]
 
 
-def google_sheet_csv_url(sheet_url: str, gid: str | int | None = None) -> str:
+def google_sheet_csv_url(
+    sheet_url: str,
+    gid: str | int | None = None,
+    sheet_name: str | None = None,
+) -> str:
     parsed = urllib.parse.urlparse(sheet_url)
     path_match = re.search(r"/spreadsheets/d/([^/]+)", parsed.path)
     if not path_match:
         raise ValueError("Unsupported Google Sheets URL format")
 
     sheet_id = path_match.group(1)
+    if sheet_name is not None:
+        return (
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq"
+            f"?tqx=out:csv&sheet={urllib.parse.quote(sheet_name)}"
+        )
+
     fragment_params = urllib.parse.parse_qs(parsed.fragment)
     query_params = urllib.parse.parse_qs(parsed.query)
     resolved_gid = str(
@@ -64,8 +83,12 @@ def google_sheet_csv_url(sheet_url: str, gid: str | int | None = None) -> str:
     )
 
 
-def fetch_sheet_rows(sheet_url: str = DEFAULT_SHEET_URL) -> tuple[list[str], list[list[str]]]:
-    csv_url = google_sheet_csv_url(sheet_url)
+def fetch_sheet_rows(
+    sheet_url: str = DEFAULT_SHEET_URL,
+    gid: str | int | None = None,
+    sheet_name: str | None = None,
+) -> tuple[list[str], list[list[str]]]:
+    csv_url = google_sheet_csv_url(sheet_url, gid=gid, sheet_name=sheet_name)
     with urllib.request.urlopen(csv_url, timeout=30) as response:
         payload = response.read().decode("utf-8-sig")
 
@@ -115,6 +138,44 @@ def parse_sheet(sheet_url: str = DEFAULT_SHEET_URL) -> tuple[list[str], list[Par
     return normalized_header, parsed_rows
 
 
+def parse_platform_sheet(
+    sheet_url: str = DEFAULT_SHEET_URL,
+    sheet_name: str = DEFAULT_PLATFORM_SHEET_NAME,
+) -> tuple[list[str], list[ParsedPlatformRow]]:
+    candidates = [sheet_name]
+    if sheet_name == DEFAULT_PLATFORM_SHEET_NAME:
+        candidates.append("Лист 3")
+
+    header: list[str] = []
+    rows: list[list[str]] = []
+    normalized_header: list[str] = []
+    for candidate in dict.fromkeys(candidates):
+        header, rows = fetch_sheet_rows(sheet_url, sheet_name=candidate)
+        normalized_header = normalize_header(header)
+        if {"platform_name", "platform_url"}.issubset(normalized_header):
+            break
+
+    if not normalized_header:
+        normalized_header = normalize_header(header)
+
+    parsed_rows: list[ParsedPlatformRow] = []
+    for offset, row in enumerate(rows, start=2):
+        if is_effectively_empty(row):
+            continue
+
+        raw_row = build_raw_row(normalized_header, row)
+        parsed_rows.append(
+            ParsedPlatformRow(
+                row_number=offset,
+                name=text_or_none(raw_row.get("platform_name")),
+                url=text_or_none(raw_row.get("platform_url")),
+                raw=raw_row,
+            )
+        )
+
+    return normalized_header, parsed_rows
+
+
 def normalize_header(header: list[str]) -> list[str]:
     known_names = {
         "menedzher": "manager",
@@ -132,6 +193,10 @@ def normalize_header(header: list[str]) -> list[str]:
         "mark": "mark",
         "oshibka": "error",
         "oshibka_ploshchadki": "error",
+        "nazvanie_ploschadki": "platform_name",
+        "nazvanie_ploshchadki": "platform_name",
+        "url_ploschadki": "platform_url",
+        "url_ploshchadki": "platform_url",
     }
 
     normalized: list[str] = []
@@ -272,6 +337,41 @@ def validate_rows(rows: list[ParsedRow]) -> list[RowIssue]:
         for attr_name, label in required_fields.items():
             if getattr(row, attr_name) is None:
                 messages.append(f"missing {label}")
+
+        suspicious_columns = [
+            key
+            for key, value in row.raw.items()
+            if key.startswith("column_") and text_or_none(value) is not None
+        ]
+        if suspicious_columns:
+            messages.append(
+                "unexpected values in unnamed columns: "
+                + ", ".join(suspicious_columns[:5])
+            )
+
+        if messages:
+            issues.append(RowIssue(row_number=row.row_number, messages=messages))
+
+    return issues
+
+
+def validate_platform_rows(rows: list[ParsedPlatformRow]) -> list[RowIssue]:
+    issues: list[RowIssue] = []
+    required_fields = {
+        "name": "название площадки",
+        "url": "URL площадки",
+    }
+
+    for row in rows:
+        messages: list[str] = []
+        for attr_name, label in required_fields.items():
+            if getattr(row, attr_name) is None:
+                messages.append(f"missing {label}")
+
+        if row.url is not None:
+            parsed_url = urllib.parse.urlparse(row.url)
+            if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                messages.append("invalid URL площадки")
 
         suspicious_columns = [
             key

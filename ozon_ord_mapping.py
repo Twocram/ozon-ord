@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlparse
 
-from sheets_reader import ParsedRow
+from sheets_reader import ParsedPlatformRow, ParsedRow
 
 DEFAULT_CAMPAIGN_TYPE = "Иное"
 DEFAULT_VAT_RATE_LABEL = "Без НДС"
@@ -137,6 +138,28 @@ def build_platform_payload(row: ParsedRow) -> OzonOrdPlatformPayload:
     )
 
 
+def build_platform_sheet_payload(row: ParsedPlatformRow) -> OzonOrdPlatformPayload:
+    missing = []
+    if row.name is None:
+        missing.append("platform_name")
+    if row.url is None:
+        missing.append("platform_url")
+
+    if missing:
+        joined = ", ".join(missing)
+        raise ValueError(
+            f"Row {row.row_number}: missing required platform fields: {joined}"
+        )
+
+    return OzonOrdPlatformPayload(
+        externalPlatformId=build_external_platform_id(row.url),
+        appName=row.name,
+        platformType=DEFAULT_PLATFORM_TYPE,
+        url=row.url,
+        comment=f"Imported from Google Sheets platform row {row.row_number}",
+    )
+
+
 def build_statistic_payload(row: ParsedRow) -> OzonOrdStatisticPayload:
     payload = map_row_to_ozon_ord_payload(row)
     platform_payload = build_platform_payload(row)
@@ -167,7 +190,7 @@ def build_external_platform_id(channel_url: str) -> str:
     parsed = urlparse(channel_url)
     normalized = f"{parsed.netloc}{parsed.path}".strip("/").lower()
     digest = hashlib.sha1(channel_url.encode("utf-8")).hexdigest()[:10]
-    slug = normalized.replace("/", "_").replace(".", "_").replace("-", "_")
+    slug = re.sub(r"[^a-z0-9]+", "_", normalized)
     slug = "_".join(part for part in slug.split("_") if part) or "platform"
     return f"{slug}_{digest}"[:120]
 

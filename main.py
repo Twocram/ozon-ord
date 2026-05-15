@@ -8,22 +8,28 @@ from env_loader import load_dotenv
 from ozon_ord_api import AdminOzonOrdClient, ExternalOzonOrdClient, OzonOrdApiError
 from ozon_ord_mapping import (
     admin_statistic_payloads_to_json,
+    platform_payloads_to_json,
     statistic_payloads_to_json,
 )
 from sheets_reader import (
+    DEFAULT_PLATFORM_SHEET_NAME,
     DEFAULT_SHEET_URL,
     filter_rows_for_processing,
+    parse_platform_sheet,
     parse_sheet,
     rows_to_json,
+    validate_platform_rows,
     validate_rows,
 )
 from sync_service import (
     build_platform_error_rows,
+    build_platform_sync_batch,
     build_sync_batch,
     extract_duplicate_statistic_row_numbers,
     extract_statistic_creation_errors,
     resolve_admin_statistics,
     save_platform_errors,
+    sync_platform_batch,
     sync_batch,
 )
 
@@ -34,14 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="preview",
-        choices=["preview", "probe-api", "sync"],
+        choices=["preview", "preview-platforms", "probe-api", "sync", "sync-platforms"],
     )
     parser.add_argument("--sheet-url", default=DEFAULT_SHEET_URL)
+    parser.add_argument("--platform-sheet-name", default=DEFAULT_PLATFORM_SHEET_NAME)
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument(
         "--send",
         action="store_true",
-        help="Actually send data to Ozon ORD for the sync command",
+        help="Actually send data to Ozon ORD for sync commands",
     )
     return parser
 
@@ -79,9 +86,75 @@ def preview(sheet_url: str, limit: int) -> int:
     return 0
 
 
+def preview_platforms(sheet_url: str, sheet_name: str, limit: int) -> int:
+    header, rows = parse_platform_sheet(sheet_url, sheet_name=sheet_name)
+    issues = validate_platform_rows(rows)
+    batch = build_platform_sync_batch(rows)
+
+    print(f"Platform sheet: {sheet_name}")
+    print(f"Columns: {len(header)}")
+    print(f"Rows parsed: {len(rows)}")
+    print(f"Rows with issues: {len(issues)}")
+    print(f"Platforms prepared: {len(batch.platforms)}")
+    print(f"Mapping errors: {len(batch.mapping_errors)}")
+
+    print("\nSample rows:")
+    print(rows_to_json(rows, limit=limit))
+
+    print("\nSample platform payloads:")
+    print(platform_payloads_to_json(batch.platforms, limit=limit))
+
+    if issues:
+        print("\nIssues:")
+        for issue in issues[:10]:
+            print(f"Row {issue.row_number}: {', '.join(issue.messages)}")
+
+    if batch.mapping_errors:
+        print("\nMapping errors:")
+        for error in batch.mapping_errors[:10]:
+            print(error)
+
+    return 0
+
+
 def probe_api() -> int:
     client = ExternalOzonOrdClient.from_env()
     response = client.list_platforms(page_size=1)
+    print(json.dumps(response, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def sync_platforms(sheet_url: str, sheet_name: str, send: bool) -> int:
+    _, rows = parse_platform_sheet(sheet_url, sheet_name=sheet_name)
+    issues = validate_platform_rows(rows)
+    batch = build_platform_sync_batch(rows)
+
+    print(f"Platform sheet: {sheet_name}")
+    print(f"Rows parsed: {len(rows)}")
+    print(f"Rows with issues: {len(issues)}")
+    print(f"Platforms prepared: {len(batch.platforms)}")
+    print(f"Mapping errors: {len(batch.mapping_errors)}")
+
+    if issues:
+        print("\nIssues:")
+        for issue in issues[:10]:
+            print(f"Row {issue.row_number}: {', '.join(issue.messages)}")
+        return 1
+
+    if batch.mapping_errors:
+        print("\nMapping errors:")
+        for error in batch.mapping_errors[:10]:
+            print(error)
+        return 1
+
+    if not send:
+        print("\nDry run mode. Use --send to push platforms to Ozon ORD.")
+        print("\nPlatform payload preview:")
+        print(platform_payloads_to_json(batch.platforms, limit=3))
+        return 0
+
+    external_client = ExternalOzonOrdClient.from_env()
+    response = sync_platform_batch(external_client, batch)
     print(json.dumps(response, ensure_ascii=False, indent=2, default=str))
     return 0
 
@@ -182,9 +255,7 @@ def sync(sheet_url: str, send: bool) -> int:
             apps_script_client = AppsScriptClient.from_env()
             if apps_script_client is not None:
                 apps_script_client.update_platform_errors(
-                    build_platform_error_rows(
-                        filtered_rows, duplicate_statistic_errors
-                    )
+                    build_platform_error_rows(filtered_rows, duplicate_statistic_errors)
                 )
 
             skipped_rows = set(duplicate_row_numbers)
@@ -227,8 +298,16 @@ def main() -> int:
     try:
         if args.command == "preview":
             return preview(args.sheet_url, args.limit)
+        if args.command == "preview-platforms":
+            return preview_platforms(
+                args.sheet_url, args.platform_sheet_name, args.limit
+            )
         if args.command == "probe-api":
             return probe_api()
+        if args.command == "sync-platforms":
+            return sync_platforms(
+                args.sheet_url, args.platform_sheet_name, args.send
+            )
         return sync(args.sheet_url, args.send)
     except OzonOrdApiError as error:
         print(f"API error: {error}")

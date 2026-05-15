@@ -10,7 +10,6 @@ from typing import Any
 
 from ozon_ord_mapping import OzonOrdPlatformPayload, OzonOrdStatisticPayload
 
-
 DEFAULT_BASE_URL = "https://ord.ozon.ru"
 
 
@@ -19,7 +18,9 @@ class OzonOrdApiError(RuntimeError):
 
 
 class ExternalOzonOrdClient:
-    def __init__(self, api_key: str, base_url: str = DEFAULT_BASE_URL, timeout: int = 30):
+    def __init__(
+        self, api_key: str, base_url: str = DEFAULT_BASE_URL, timeout: int = 30
+    ):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -35,7 +36,11 @@ class ExternalOzonOrdClient:
         return cls(api_key=api_key, base_url=base_url, timeout=timeout)
 
     def list_platforms(self, page_size: int = 1) -> dict[str, Any]:
-        payload = {"cursor": {"externalId": "", "updatedAt": None}, "orderBy": "ASC", "pageSize": page_size}
+        payload = {
+            "cursor": {"externalId": "", "updatedAt": None},
+            "orderBy": "ASC",
+            "pageSize": page_size,
+        }
         return self._request_json("POST", "/api/external/platform/list", payload)
 
     def register_or_update_platforms(
@@ -87,7 +92,11 @@ class ExternalOzonOrdClient:
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{endpoint}"
-        data = None if payload is None else json.dumps(payload, default=str).encode("utf-8")
+        data = (
+            None
+            if payload is None
+            else json.dumps(payload, default=str).encode("utf-8")
+        )
         request = urllib.request.Request(
             url=url,
             data=data,
@@ -160,7 +169,9 @@ class AdminOzonOrdClient:
         return _perform_json_request(request, timeout=self.timeout)
 
 
-def _perform_json_request(request: urllib.request.Request, timeout: int) -> dict[str, Any]:
+def _perform_json_request(
+    request: urllib.request.Request, timeout: int
+) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
@@ -171,4 +182,6 @@ def _perform_json_request(request: urllib.request.Request, timeout: int) -> dict
             f"{request.method} {request.full_url} failed with HTTP {error.code}: {raw}"
         ) from error
     except urllib.error.URLError as error:
-        raise OzonOrdApiError(f"{request.method} {request.full_url} failed: {error}") from error
+        raise OzonOrdApiError(
+            f"{request.method} {request.full_url} failed: {error}"
+        ) from error

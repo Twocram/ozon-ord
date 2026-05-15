@@ -11,16 +11,23 @@ from ozon_ord_mapping import (
     OzonOrdAdminStatisticPayload,
     OzonOrdPlatformPayload,
     OzonOrdStatisticPayload,
+    build_platform_sheet_payload,
     build_platform_payload,
     build_statistic_payload,
 )
-from sheets_reader import ParsedRow
+from sheets_reader import ParsedPlatformRow, ParsedRow
 
 
 @dataclass
 class SyncBatch:
     platforms: list[OzonOrdPlatformPayload]
     statistics: list[OzonOrdStatisticPayload]
+    mapping_errors: list[str]
+
+
+@dataclass
+class PlatformSyncBatch:
+    platforms: list[OzonOrdPlatformPayload]
     mapping_errors: list[str]
 
 
@@ -51,6 +58,40 @@ def build_sync_batch(rows: list[ParsedRow]) -> SyncBatch:
         statistics=statistics,
         mapping_errors=mapping_errors,
     )
+
+
+def build_platform_sync_batch(rows: list[ParsedPlatformRow]) -> PlatformSyncBatch:
+    platforms_by_id: dict[str, OzonOrdPlatformPayload] = {}
+    mapping_errors: list[str] = []
+
+    for row in rows:
+        try:
+            platform_payload = build_platform_sheet_payload(row)
+        except ValueError as error:
+            mapping_errors.append(str(error))
+            continue
+
+        platforms_by_id[platform_payload.externalPlatformId] = platform_payload
+
+    return PlatformSyncBatch(
+        platforms=list(platforms_by_id.values()),
+        mapping_errors=mapping_errors,
+    )
+
+
+def sync_platform_batch(
+    external_client: ExternalOzonOrdClient,
+    batch: PlatformSyncBatch,
+) -> dict[str, object]:
+    platform_response = None
+    if batch.platforms:
+        platform_response = external_client.register_or_update_platforms(
+            batch.platforms
+        )
+
+    return {
+        "platform_response": platform_response,
+    }
 
 
 def resolve_admin_statistics(
@@ -162,7 +203,9 @@ def resolve_platform_ids(
         for external_id, url in external_platform_urls.items()
     }
     found_by_external_id: dict[str, str] = {}
-    matches_by_external_id: dict[str, list[str]] = {external_id: [] for external_id in target_urls.values()}
+    matches_by_external_id: dict[str, list[str]] = {
+        external_id: [] for external_id in target_urls.values()
+    }
     errors: list[str] = []
     cursor_external_id = ""
     cursor_updated_at = None
@@ -247,17 +290,25 @@ def _extract_row_number(comment: str) -> int:
     return int(tail) if tail.isdigit() else 0
 
 
-def save_platform_errors(rows: list[ParsedRow], errors: list[str], path: str = "platform_errors.json") -> None:
+def save_platform_errors(
+    rows: list[ParsedRow], errors: list[str], path: str = "platform_errors.json"
+) -> None:
     payload = build_platform_error_payload(rows, errors)
-    Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    Path(path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
-def build_platform_error_rows(rows: list[ParsedRow], errors: list[str]) -> list[dict[str, object]]:
+def build_platform_error_rows(
+    rows: list[ParsedRow], errors: list[str]
+) -> list[dict[str, object]]:
     payload = build_platform_error_payload(rows, errors)
     return payload["rows"]
 
 
-def build_platform_error_payload(rows: list[ParsedRow], errors: list[str]) -> dict[str, object]:
+def build_platform_error_payload(
+    rows: list[ParsedRow], errors: list[str]
+) -> dict[str, object]:
     error_by_external_platform_id: dict[str, str] = {}
     error_by_row_number: dict[int, str] = {}
     for error in errors:
@@ -302,7 +353,7 @@ def _row_external_platform_id(row: ParsedRow) -> str | None:
 def _normalize_platform_error_external_id(value: str) -> str:
     prefix = "externalPlatformId="
     if value.startswith(prefix):
-        return value[len(prefix):]
+        return value[len(prefix) :]
     return value
 
 
