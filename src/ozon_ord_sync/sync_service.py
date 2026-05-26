@@ -6,8 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ozon_ord_api import AdminOzonOrdClient, ExternalOzonOrdClient, OzonOrdApiError
-from ozon_ord_mapping import (
+from ozon_ord_sync.ozon_ord_api import (
+    AdminOzonOrdClient,
+    ExternalOzonOrdClient,
+    OzonOrdApiError,
+)
+from ozon_ord_sync.ozon_ord_mapping import (
     OzonOrdAdminStatisticPayload,
     OzonOrdPlatformPayload,
     OzonOrdStatisticPayload,
@@ -15,7 +19,7 @@ from ozon_ord_mapping import (
     build_platform_payload,
     build_statistic_payload,
 )
-from sheets_reader import ParsedPlatformRow, ParsedRow
+from ozon_ord_sync.sheets_reader import ParsedPlatformRow, ParsedRow
 
 
 @dataclass

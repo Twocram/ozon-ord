@@ -1,16 +1,7 @@
 {
-  "rows": [
-    {
-      "row_number": 75,
-      "creative_id": "2W5zFHhYxDw",
-      "channel_url": "https://t.me/ada_jef",
-      "error": "Площадка не найдена",
-      "platform_error": "Площадка не найдена"
-    }
-  ],
+  "rows": [],
   "errors": [
-    "Creative marker not found: 2W5zFG95MWZ..",
-    "Creative not found for marker=2W5zFG95MWZ..",
-    "Platform not found: externalPlatformId=t_me_ada_jef_0d5fe33201"
+    "Creative marker not found: Snimsi",
+    "Creative not found for marker=Snimsi"
   ]
 }

@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlparse
 
-from sheets_reader import ParsedPlatformRow, ParsedRow
+from ozon_ord_sync.sheets_reader import ParsedPlatformRow, ParsedRow
 
 DEFAULT_CAMPAIGN_TYPE = "Иное"
 DEFAULT_VAT_RATE_LABEL = "Без НДС"
