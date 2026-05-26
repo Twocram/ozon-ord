@@ -3,97 +3,42 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlparse
 
-from ozon_ord_sync.infrastructure.google_sheets import ParsedPlatformRow, ParsedRow
+from ozon_ord_sync.domain.models import (
+    OzonOrdAdminStatisticPayload,
+    OzonOrdPayload,
+    OzonOrdPlatformPayload,
+    OzonOrdStatisticPayload,
+    ParsedPlatformRow,
+    ParsedRow,
+)
 
 DEFAULT_CAMPAIGN_TYPE = "Иное"
 DEFAULT_VAT_RATE_LABEL = "Без НДС"
 DEFAULT_PLATFORM_TYPE = "PLATFORM_TYPE_SITE"
 
 
-@dataclass
-class OzonOrdPayload:
-    row_number: int
-    creative: str
-    platform: str
-    campaign_type: str
-    factual_impressions: int
-    planned_impressions: int
-    factual_display_start_date: date
-    factual_display_end_date: date
-    planned_display_start_date: date
-    planned_display_end_date: date
-    vat_rate: str
-    service_amount: Decimal
-    amount_mode: str
-    unit_price_with_vat: Decimal
-
-
-@dataclass
-class OzonOrdPlatformPayload:
-    externalPlatformId: str
-    appName: str
-    platformType: str
-    url: str
-    comment: str
-
-
-@dataclass
-class OzonOrdStatisticPayload:
-    externalStatisticId: str
-    externalCreativeId: str
-    externalPlatformId: str
-    dateStartFact: date
-    dateEndFact: date
-    dateStartPlan: date
-    dateEndPlan: date
-    viewsCountByFact: str
-    viewsCountByInvoice: str
-    moneySpent: str
-    unitCost: str
-    withNds: bool
-    comment: str
-
-
-@dataclass
-class OzonOrdAdminStatisticPayload:
-    creativeId: str
-    platformId: str
-    price: dict[str, str | bool]
-    comment: str
-    dateEndFact: date
-    dateEndPlan: date
-    paymentType: str
-    dateStartFact: date
-    dateStartPlan: date
-    unitCost: str
-    viewsCountByFact: str
-    viewsCountByInvoice: str
-    sameDate: bool
-    sameViews: bool
-    isAutoCalc: bool
-    isSelfPromo: bool
-    isNative: bool
-    externalId: str
-    fromDate: str
-    toDate: str
-
-
 def map_row_to_ozon_ord_payload(row: ParsedRow) -> OzonOrdPayload:
-    missing = []
-    if row.creative_id is None:
+    creative_id = row.creative_id
+    channel_url = row.channel_url
+    reach = row.reach
+    publication_date = row.publication_date
+    price_with_tax = row.price_with_tax
+
+    missing: list[str] = []
+    if creative_id is None:
         missing.append("creative_id")
-    if row.channel_url is None:
+    if channel_url is None:
         missing.append("channel_url")
-    if row.reach is None:
+    if reach is None:
         missing.append("reach")
-    if row.publication_date is None:
+    if publication_date is None:
         missing.append("publication_date")
-    if row.price_with_tax is None:
+    if price_with_tax is None:
         missing.append("price_with_tax")
 
     if missing:
@@ -102,47 +47,60 @@ def map_row_to_ozon_ord_payload(row: ParsedRow) -> OzonOrdPayload:
             f"Row {row.row_number}: missing required mapping fields: {joined}"
         )
 
-    display_start_date = row.publication_date
-    display_end_date = row.publication_date + timedelta(days=1)
+    if (
+        creative_id is None
+        or channel_url is None
+        or reach is None
+        or publication_date is None
+        or price_with_tax is None
+    ):
+        raise ValueError(f"Row {row.row_number}: missing required mapping fields")
+
+    display_start_date = publication_date
+    display_end_date = publication_date + timedelta(days=1)
 
     return OzonOrdPayload(
         row_number=row.row_number,
-        creative=row.creative_id,
-        platform=row.channel_url,
+        creative=creative_id,
+        platform=channel_url,
         campaign_type=DEFAULT_CAMPAIGN_TYPE,
-        factual_impressions=row.reach,
-        planned_impressions=row.reach,
+        factual_impressions=reach,
+        planned_impressions=reach,
         factual_display_start_date=display_start_date,
         factual_display_end_date=display_end_date,
         planned_display_start_date=display_start_date,
         planned_display_end_date=display_end_date,
         vat_rate=DEFAULT_VAT_RATE_LABEL,
-        service_amount=row.price_with_tax,
+        service_amount=price_with_tax,
         amount_mode="without_vat",
-        unit_price_with_vat=row.price_with_tax,
+        unit_price_with_vat=price_with_tax,
     )
 
 
 def build_platform_payload(row: ParsedRow) -> OzonOrdPlatformPayload:
-    if row.channel_url is None:
+    channel_url = row.channel_url
+    if channel_url is None:
         raise ValueError(
             f"Row {row.row_number}: missing channel_url for platform payload"
         )
 
     return OzonOrdPlatformPayload(
-        externalPlatformId=build_external_platform_id(row.channel_url),
-        appName=build_platform_name(row.channel_url),
+        externalPlatformId=build_external_platform_id(channel_url),
+        appName=build_platform_name(channel_url),
         platformType=DEFAULT_PLATFORM_TYPE,
-        url=row.channel_url,
+        url=channel_url,
         comment=f"Imported from Google Sheets row {row.row_number}",
     )
 
 
 def build_platform_sheet_payload(row: ParsedPlatformRow) -> OzonOrdPlatformPayload:
-    missing = []
-    if row.name is None:
+    name = row.name
+    url = row.url
+
+    missing: list[str] = []
+    if name is None:
         missing.append("platform_name")
-    if row.url is None:
+    if url is None:
         missing.append("platform_url")
 
     if missing:
@@ -151,11 +109,14 @@ def build_platform_sheet_payload(row: ParsedPlatformRow) -> OzonOrdPlatformPaylo
             f"Row {row.row_number}: missing required platform fields: {joined}"
         )
 
+    if name is None or url is None:
+        raise ValueError(f"Row {row.row_number}: missing required platform fields")
+
     return OzonOrdPlatformPayload(
-        externalPlatformId=build_external_platform_id(row.url),
-        appName=row.name,
+        externalPlatformId=build_external_platform_id(url),
+        appName=name,
         platformType=DEFAULT_PLATFORM_TYPE,
-        url=row.url,
+        url=url,
         comment=f"Imported from Google Sheets platform row {row.row_number}",
     )
 

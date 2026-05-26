@@ -6,8 +6,9 @@ The project is now packaged as `ozon_ord_sync` under `src/`. This keeps imports 
 
 - `ozon_ord_sync.cli` — CLI entry point and command orchestration.
 - `ozon_ord_sync.application.sync_service` — application workflow: builds sync batches, resolves Ozon IDs, handles duplicate statistic errors, and writes platform error reports.
+- `ozon_ord_sync.domain.models` — shared parsed row, validation issue, Ozon ORD payload, and sync batch dataclasses.
 - `ozon_ord_sync.infrastructure.google_sheets` — Google Sheets CSV access, row parsing, filtering, and validation.
-- `ozon_ord_sync.domain.mapping` — conversion from parsed sheet rows to Ozon ORD payload dataclasses.
+- `ozon_ord_sync.domain.mapping` — conversion from parsed sheet rows to Ozon ORD payload models.
 - `ozon_ord_sync.infrastructure.ozon_ord` — Ozon ORD HTTP clients.
 - `ozon_ord_sync.infrastructure.apps_script` — Google Apps Script HTTP client for writing platform errors back.
 - `ozon_ord_sync.config.env` — `.env` loading utility.
@@ -23,6 +24,7 @@ ozon_ord_sync/
   config/
     env.py
   domain/
+    models.py
     mapping.py
   application/
     sync_service.py
@@ -32,4 +34,4 @@ ozon_ord_sync/
     apps_script.py
 ```
 
-The next safe step is to extract dataclasses from `infrastructure/google_sheets.py` and `domain/mapping.py` into domain model modules. That will reduce coupling between parsers, mappers, and HTTP clients before any behavior changes.
+The next safe step is to split Google Sheets transport from row parsing/validation. That will keep network access in infrastructure while moving sheet normalization rules closer to the application/domain boundary.

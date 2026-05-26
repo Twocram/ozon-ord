@@ -8,10 +8,7 @@ import urllib.request
 from dataclasses import asdict
 from typing import Any
 
-from ozon_ord_sync.domain.mapping import (
-    OzonOrdPlatformPayload,
-    OzonOrdStatisticPayload,
-)
+from ozon_ord_sync.domain.models import OzonOrdPlatformPayload
 
 DEFAULT_BASE_URL = "https://ord.ozon.ru"
 

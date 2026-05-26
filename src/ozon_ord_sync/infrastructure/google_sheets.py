@@ -6,12 +6,14 @@ import re
 import urllib.parse
 import urllib.request
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import StringIO
 from itertools import islice
 from typing import Any, TypeVar
+
+from ozon_ord_sync.domain.models import ParsedPlatformRow, ParsedRow, RowIssue
 
 
 DEFAULT_SHEET_URL = (
@@ -20,38 +22,6 @@ DEFAULT_SHEET_URL = (
 )
 DEFAULT_PLATFORM_SHEET_NAME = "Лист3"
 TARGET_EXECUTOR = "100б"
-
-
-@dataclass
-class ParsedRow:
-    row_number: int
-    manager: str | None
-    month: date | None
-    platform: str | None
-    creative_id: str | None
-    channel_url: str | None
-    executor: str | None
-    contractor: str | None
-    price_with_tax: Decimal | None
-    publication_date: date | None
-    reach: int | None
-    mark: str | None
-    error: str | None
-    raw: dict[str, Any]
-
-
-@dataclass
-class ParsedPlatformRow:
-    row_number: int
-    name: str | None
-    url: str | None
-    raw: dict[str, Any]
-
-
-@dataclass
-class RowIssue:
-    row_number: int
-    messages: list[str]
 
 
 ParsedSheetRow = TypeVar("ParsedSheetRow", ParsedRow, ParsedPlatformRow)
