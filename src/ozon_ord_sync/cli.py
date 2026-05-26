@@ -218,6 +218,7 @@ def sync(sheet_url: str, send: bool) -> int:
 
     duplicate_statistic_errors: list[str] = []
     pending_statistics = resolved_statistics
+    response: dict[str, object]
     try:
         while True:
             response = sync_batch(

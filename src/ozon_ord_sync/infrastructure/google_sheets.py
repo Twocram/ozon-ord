@@ -5,11 +5,13 @@ import json
 import re
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import StringIO
-from typing import Any
+from itertools import islice
+from typing import Any, TypeVar
 
 
 DEFAULT_SHEET_URL = (
@@ -50,6 +52,9 @@ class ParsedPlatformRow:
 class RowIssue:
     row_number: int
     messages: list[str]
+
+
+ParsedSheetRow = TypeVar("ParsedSheetRow", ParsedRow, ParsedPlatformRow)
 
 
 def google_sheet_csv_url(
@@ -302,8 +307,8 @@ def slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", translit).strip("_")
 
 
-def rows_to_json(rows: list[ParsedRow], limit: int = 3) -> str:
-    payload = [asdict(row) for row in rows[:limit]]
+def rows_to_json(rows: Iterable[ParsedSheetRow], limit: int = 3) -> str:
+    payload = [asdict(row) for row in islice(rows, limit)]
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
