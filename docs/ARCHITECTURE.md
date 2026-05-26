@@ -4,26 +4,25 @@ The project is now packaged as `ozon_ord_sync` under `src/`. This keeps imports 
 
 ## Current layers
 
-- `ozon_ord_sync.main` — CLI entry point and command orchestration.
-- `ozon_ord_sync.sync_service` — application workflow: builds sync batches, resolves Ozon IDs, handles duplicate statistic errors, and writes platform error reports.
-- `ozon_ord_sync.sheets_reader` — Google Sheets CSV access, row parsing, filtering, and validation.
-- `ozon_ord_sync.ozon_ord_mapping` — conversion from parsed sheet rows to Ozon ORD payload dataclasses.
-- `ozon_ord_sync.ozon_ord_api` — Ozon ORD HTTP clients.
-- `ozon_ord_sync.apps_script_client` — Google Apps Script HTTP client for writing platform errors back.
-- `ozon_ord_sync.env_loader` — `.env` loading utility.
+- `ozon_ord_sync.cli` — CLI entry point and command orchestration.
+- `ozon_ord_sync.application.sync_service` — application workflow: builds sync batches, resolves Ozon IDs, handles duplicate statistic errors, and writes platform error reports.
+- `ozon_ord_sync.infrastructure.google_sheets` — Google Sheets CSV access, row parsing, filtering, and validation.
+- `ozon_ord_sync.domain.mapping` — conversion from parsed sheet rows to Ozon ORD payload dataclasses.
+- `ozon_ord_sync.infrastructure.ozon_ord` — Ozon ORD HTTP clients.
+- `ozon_ord_sync.infrastructure.apps_script` — Google Apps Script HTTP client for writing platform errors back.
+- `ozon_ord_sync.config.env` — `.env` loading utility.
 
-The root `main.py` remains as a compatibility wrapper for `python main.py`.
+The root `main.py` remains as a compatibility wrapper for `python main.py`. The former package-level module names (`ozon_ord_sync.sync_service`, `ozon_ord_sync.sheets_reader`, and similar) are also kept as compatibility wrappers while the codebase migrates to the layered imports.
 
 ## Target direction
 
-Future refactoring should move toward explicit packages without changing the domain flow:
+The package now follows this structure:
 
 ```text
 ozon_ord_sync/
-  cli.py
   config/
+    env.py
   domain/
-    models.py
     mapping.py
   application/
     sync_service.py
@@ -33,4 +32,4 @@ ozon_ord_sync/
     apps_script.py
 ```
 
-The next safe step is to extract dataclasses from `sheets_reader.py` and `ozon_ord_mapping.py` into domain model modules. That will reduce coupling between parsers, mappers, and HTTP clients before any behavior changes.
+The next safe step is to extract dataclasses from `infrastructure/google_sheets.py` and `domain/mapping.py` into domain model modules. That will reduce coupling between parsers, mappers, and HTTP clients before any behavior changes.
