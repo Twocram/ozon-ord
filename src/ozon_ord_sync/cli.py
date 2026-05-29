@@ -3,6 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 
+from ozon_ord_sync.application.sync_service import (
+    build_platform_error_rows,
+    build_platform_sync_batch,
+    build_sync_batch,
+    extract_duplicate_statistic_row_numbers,
+    extract_statistic_creation_errors,
+    resolve_admin_statistics,
+    save_platform_errors,
+    sync_batch,
+    sync_platform_batch,
+)
 from ozon_ord_sync.config.env import load_dotenv
 from ozon_ord_sync.domain.mapping import (
     admin_statistic_payloads_to_json,
@@ -24,17 +35,6 @@ from ozon_ord_sync.infrastructure.ozon_ord import (
     AdminOzonOrdClient,
     ExternalOzonOrdClient,
     OzonOrdApiError,
-)
-from ozon_ord_sync.application.sync_service import (
-    build_platform_error_rows,
-    build_platform_sync_batch,
-    build_sync_batch,
-    extract_duplicate_statistic_row_numbers,
-    extract_statistic_creation_errors,
-    resolve_admin_statistics,
-    save_platform_errors,
-    sync_platform_batch,
-    sync_batch,
 )
 
 
@@ -310,9 +310,7 @@ def main() -> int:
         if args.command == "probe-api":
             return probe_api()
         if args.command == "sync-platforms":
-            return sync_platforms(
-                args.sheet_url, args.platform_sheet_name, args.send
-            )
+            return sync_platforms(args.sheet_url, args.platform_sheet_name, args.send)
         return sync(args.sheet_url, args.send)
     except OzonOrdApiError as error:
         print(f"API error: {error}")
