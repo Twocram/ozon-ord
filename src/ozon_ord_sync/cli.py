@@ -12,6 +12,14 @@ from ozon_ord_sync.application.sync_service import (
     sync_batch_skipping_duplicate_statistics,
     sync_platform_batch,
 )
+from ozon_ord_sync.application.sheet_parser import (
+    filter_rows_for_processing,
+    parse_platform_sheet,
+    parse_sheet,
+    rows_to_json,
+    validate_platform_rows,
+    validate_rows,
+)
 from ozon_ord_sync.config.env import load_dotenv
 from ozon_ord_sync.domain.mapping import (
     admin_statistic_payloads_to_json,
@@ -23,12 +31,6 @@ from ozon_ord_sync.infrastructure.apps_script import AppsScriptClient, AppsScrip
 from ozon_ord_sync.infrastructure.google_sheets import (
     DEFAULT_PLATFORM_SHEET_NAME,
     DEFAULT_SHEET_URL,
-    filter_rows_for_processing,
-    parse_platform_sheet,
-    parse_sheet,
-    rows_to_json,
-    validate_platform_rows,
-    validate_rows,
 )
 from ozon_ord_sync.infrastructure.ozon_ord import (
     AdminOzonOrdClient,
