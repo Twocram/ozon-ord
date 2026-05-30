@@ -9,6 +9,7 @@ The project is now packaged as `ozon_ord_sync` under `src/`. This keeps imports 
 - `ozon_ord_sync.domain.models` — shared parsed row, validation issue, Ozon ORD payload, and sync batch dataclasses.
 - `ozon_ord_sync.infrastructure.google_sheets` — Google Sheets CSV URL building and transport.
 - `ozon_ord_sync.application.sheet_parser` — sheet row parsing, filtering, validation, and row preview formatting.
+- `ozon_ord_sync.application.formatting` — CLI-facing JSON preview formatting for payload dataclasses.
 - `ozon_ord_sync.domain.mapping` — conversion from parsed sheet rows to Ozon ORD payload models.
 - `ozon_ord_sync.infrastructure.ozon_ord` — Ozon ORD HTTP clients.
 - `ozon_ord_sync.infrastructure.apps_script` — Google Apps Script HTTP client for writing platform errors back.
@@ -33,7 +34,7 @@ Observed boundaries:
 
 - `cli.py` imports the new layered modules directly, handles argument parsing/printing, and delegates duplicate-statistic retry logic to the application layer.
 - `application.sync_service` coordinates batch creation, Ozon ID resolution, sync submission, duplicate-statistic retries, and platform error report generation.
-- `domain.models` and `domain.mapping` are pure dataclasses/transformation logic, except JSON preview helpers in `domain.mapping` that are CLI-facing formatting utilities.
+- `domain.models` and `domain.mapping` are pure dataclasses/transformation logic.
 - `infrastructure.google_sheets` owns only Google Sheets CSV URL building and transport; parsing/validation lives in `application.sheet_parser`.
 - `infrastructure.ozon_ord` and `infrastructure.apps_script` own HTTP access and environment-based client factories.
 
@@ -49,6 +50,7 @@ ozon_ord_sync/
     models.py
     mapping.py
   application/
+    formatting.py
     sheet_parser.py
     sync_service.py
   infrastructure/
@@ -57,4 +59,4 @@ ozon_ord_sync/
     apps_script.py
 ```
 
-The next safe step is to move CLI presentation helpers (`*_payloads_to_json`) out of `domain.mapping`, leaving that module focused on pure Ozon ORD payload mapping.
+The next safe step is to add focused tests for sheet parsing, payload mapping, and duplicate-statistic error extraction before larger behavior changes.

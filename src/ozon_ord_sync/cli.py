@@ -3,14 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 
-from ozon_ord_sync.application.sync_service import (
-    build_platform_error_rows,
-    build_platform_sync_batch,
-    build_sync_batch,
-    resolve_admin_statistics,
-    save_platform_errors,
-    sync_batch_skipping_duplicate_statistics,
-    sync_platform_batch,
+from ozon_ord_sync.application.formatting import (
+    admin_statistic_payloads_to_json,
+    platform_payloads_to_json,
+    statistic_payloads_to_json,
 )
 from ozon_ord_sync.application.sheet_parser import (
     filter_rows_for_processing,
@@ -20,12 +16,16 @@ from ozon_ord_sync.application.sheet_parser import (
     validate_platform_rows,
     validate_rows,
 )
-from ozon_ord_sync.config.env import load_dotenv
-from ozon_ord_sync.domain.mapping import (
-    admin_statistic_payloads_to_json,
-    platform_payloads_to_json,
-    statistic_payloads_to_json,
+from ozon_ord_sync.application.sync_service import (
+    build_platform_error_rows,
+    build_platform_sync_batch,
+    build_sync_batch,
+    resolve_admin_statistics,
+    save_platform_errors,
+    sync_batch_skipping_duplicate_statistics,
+    sync_platform_batch,
 )
+from ozon_ord_sync.config.env import load_dotenv
 from ozon_ord_sync.domain.models import ParsedRow
 from ozon_ord_sync.infrastructure.apps_script import AppsScriptClient, AppsScriptError
 from ozon_ord_sync.infrastructure.google_sheets import (

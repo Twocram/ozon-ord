@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-from dataclasses import asdict
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlparse
 
 from ozon_ord_sync.domain.models import (
-    OzonOrdAdminStatisticPayload,
     OzonOrdPayload,
     OzonOrdPlatformPayload,
     OzonOrdStatisticPayload,
@@ -181,29 +178,3 @@ def build_platform_name(channel_url: str) -> str:
 def format_decimal(value: Decimal) -> str:
     normalized = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return format(normalized, "f")
-
-
-def payloads_to_json(payloads: list[OzonOrdPayload], limit: int = 3) -> str:
-    data = [asdict(payload) for payload in payloads[:limit]]
-    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
-
-
-def platform_payloads_to_json(
-    payloads: list[OzonOrdPlatformPayload], limit: int = 3
-) -> str:
-    data = [asdict(payload) for payload in payloads[:limit]]
-    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
-
-
-def statistic_payloads_to_json(
-    payloads: list[OzonOrdStatisticPayload], limit: int = 3
-) -> str:
-    data = [asdict(payload) for payload in payloads[:limit]]
-    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
-
-
-def admin_statistic_payloads_to_json(
-    payloads: list[OzonOrdAdminStatisticPayload], limit: int = 3
-) -> str:
-    data = [asdict(payload) for payload in payloads[:limit]]
-    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
