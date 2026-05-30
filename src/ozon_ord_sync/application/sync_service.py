@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -187,6 +188,62 @@ def sync_batch(
     return {
         "statistic_response": statistic_response,
     }
+
+
+def sync_batch_skipping_duplicate_statistics(
+    external_client: ExternalOzonOrdClient,
+    admin_client: AdminOzonOrdClient,
+    batch: SyncBatch,
+    resolved_statistics: list[ResolvedStatisticPayload],
+    on_duplicate_errors: Callable[[list[str]], None] | None = None,
+) -> dict[str, object]:
+    duplicate_statistic_errors: list[str] = []
+    pending_statistics = resolved_statistics
+
+    while pending_statistics:
+        try:
+            response = sync_batch(
+                external_client,
+                admin_client,
+                batch,
+                resolved_statistics=pending_statistics,
+            )
+            break
+        except OzonOrdApiError as error:
+            message = str(error)
+            duplicate_row_numbers = extract_duplicate_statistic_row_numbers(
+                message, pending_statistics
+            )
+            if not duplicate_row_numbers:
+                raise
+
+            statistic_errors = extract_statistic_creation_errors(
+                message, pending_statistics
+            )
+            duplicate_statistic_errors.extend(
+                error_text
+                for error_text in statistic_errors
+                if error_text not in duplicate_statistic_errors
+            )
+            if on_duplicate_errors is not None:
+                on_duplicate_errors(duplicate_statistic_errors)
+
+            skipped_rows = set(duplicate_row_numbers)
+            next_pending_statistics = [
+                item
+                for item in pending_statistics
+                if item.row_number not in skipped_rows
+            ]
+            if len(next_pending_statistics) == len(pending_statistics):
+                raise
+            pending_statistics = next_pending_statistics
+    else:
+        response = {"statistic_response": None}
+
+    if duplicate_statistic_errors:
+        response["skipped_errors"] = duplicate_statistic_errors
+
+    return response
 
 
 def resolve_platform_ids(

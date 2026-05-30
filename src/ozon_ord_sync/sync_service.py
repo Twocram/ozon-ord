@@ -16,6 +16,7 @@ from ozon_ord_sync.application.sync_service import (
     save_platform_errors,
     split_resolution_errors,
     sync_batch,
+    sync_batch_skipping_duplicate_statistics,
     sync_platform_batch,
 )
 
@@ -33,5 +34,6 @@ __all__ = [
     "save_platform_errors",
     "split_resolution_errors",
     "sync_batch",
+    "sync_batch_skipping_duplicate_statistics",
     "sync_platform_batch",
 ]
