@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.request
 from typing import Any
@@ -16,16 +15,6 @@ class AppsScriptClient:
         self.web_app_url = web_app_url
         self.token = token
         self.timeout = timeout
-
-    @classmethod
-    def from_env(cls) -> "AppsScriptClient | None":
-        web_app_url = os.getenv("GOOGLE_APPS_SCRIPT_WEB_APP_URL")
-        if not web_app_url:
-            return None
-
-        token = os.getenv("GOOGLE_APPS_SCRIPT_TOKEN")
-        timeout = int(os.getenv("GOOGLE_APPS_SCRIPT_TIMEOUT", "30"))
-        return cls(web_app_url=web_app_url, token=token, timeout=timeout)
 
     def update_platform_errors(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         payload: dict[str, Any] = {"action": "update_platform_errors", "rows": rows}

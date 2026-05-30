@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+import json
+
+from ozon_ord_sync.application.formatting import (
+    admin_statistic_payloads_to_json,
+    platform_payloads_to_json,
+    statistic_payloads_to_json,
+)
+from ozon_ord_sync.application.sheet_parser import (
+    filter_rows_for_processing,
+    parse_platform_sheet,
+    parse_sheet,
+    rows_to_json,
+    validate_platform_rows,
+    validate_rows,
+)
+from ozon_ord_sync.application.sync_service import (
+    build_platform_error_rows,
+    build_platform_sync_batch,
+    build_sync_batch,
+    resolve_admin_statistics,
+    save_platform_errors,
+    sync_batch_skipping_duplicate_statistics,
+    sync_platform_batch,
+)
+from ozon_ord_sync.config.factories import (
+    build_admin_ozon_ord_client_from_env,
+    build_apps_script_client_from_env,
+    build_external_ozon_ord_client_from_env,
+)
+from ozon_ord_sync.domain.models import ParsedRow
+from ozon_ord_sync.infrastructure.ozon_ord import OzonOrdApiError
+
+
+def preview(sheet_url: str, limit: int) -> int:
+    header, rows = parse_sheet(sheet_url)
+    filtered_rows = filter_rows_for_processing(rows)
+    issues = validate_rows(filtered_rows)
+    batch = build_sync_batch(filtered_rows)
+
+    print(f"Columns: {len(header)}")
+    print(f"Rows parsed: {len(rows)}")
+    print(f"Rows eligible: {len(filtered_rows)}")
+    print(f"Rows skipped by executor filter: {len(rows) - len(filtered_rows)}")
+    print(f"Rows with issues: {len(issues)}")
+    print(f"Statistics prepared: {len(batch.statistics)}")
+    print(f"Mapping errors: {len(batch.mapping_errors)}")
+
+    print("\nSample rows:")
+    print(rows_to_json(filtered_rows, limit=limit))
+
+    print("\nSample statistic payloads:")
+    print(statistic_payloads_to_json(batch.statistics, limit=limit))
+
+    if issues:
+        print("\nIssues:")
+        for issue in issues[:10]:
+            print(f"Row {issue.row_number}: {', '.join(issue.messages)}")
+
+    if batch.mapping_errors:
+        print("\nMapping errors:")
+        for error in batch.mapping_errors[:10]:
+            print(error)
+
+    return 0
+
+
+def preview_platforms(sheet_url: str, sheet_name: str, limit: int) -> int:
+    header, rows = parse_platform_sheet(sheet_url, sheet_name=sheet_name)
+    issues = validate_platform_rows(rows)
+    batch = build_platform_sync_batch(rows)
+
+    print(f"Platform sheet: {sheet_name}")
+    print(f"Columns: {len(header)}")
+    print(f"Rows parsed: {len(rows)}")
+    print(f"Rows with issues: {len(issues)}")
+    print(f"Platforms prepared: {len(batch.platforms)}")
+    print(f"Mapping errors: {len(batch.mapping_errors)}")
+
+    print("\nSample rows:")
+    print(rows_to_json(rows, limit=limit))
+
+    print("\nSample platform payloads:")
+    print(platform_payloads_to_json(batch.platforms, limit=limit))
+
+    if issues:
+        print("\nIssues:")
+        for issue in issues[:10]:
+            print(f"Row {issue.row_number}: {', '.join(issue.messages)}")
+
+    if batch.mapping_errors:
+        print("\nMapping errors:")
+        for error in batch.mapping_errors[:10]:
+            print(error)
+
+    return 0
+
+
+def probe_api() -> int:
+    client = build_external_ozon_ord_client_from_env()
+    response = client.list_platforms(page_size=1)
+    print(json.dumps(response, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def sync_platforms(sheet_url: str, sheet_name: str, send: bool) -> int:
+    _, rows = parse_platform_sheet(sheet_url, sheet_name=sheet_name)
+    issues = validate_platform_rows(rows)
+    batch = build_platform_sync_batch(rows)
+
+    print(f"Platform sheet: {sheet_name}")
+    print(f"Rows parsed: {len(rows)}")
+    print(f"Rows with issues: {len(issues)}")
+    print(f"Platforms prepared: {len(batch.platforms)}")
+    print(f"Mapping errors: {len(batch.mapping_errors)}")
+
+    if issues:
+        print("\nIssues:")
+        for issue in issues[:10]:
+            print(f"Row {issue.row_number}: {', '.join(issue.messages)}")
+        return 1
+
+    if batch.mapping_errors:
+        print("\nMapping errors:")
+        for error in batch.mapping_errors[:10]:
+            print(error)
+        return 1
+
+    if not send:
+        print("\nDry run mode. Use --send to push platforms to Ozon ORD.")
+        print("\nPlatform payload preview:")
+        print(platform_payloads_to_json(batch.platforms, limit=3))
+        return 0
+
+    external_client = build_external_ozon_ord_client_from_env()
+    response = sync_platform_batch(external_client, batch)
+    print(json.dumps(response, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def sync(sheet_url: str, send: bool) -> int:
+    _, rows = parse_sheet(sheet_url)
+    filtered_rows = filter_rows_for_processing(rows)
+    batch = build_sync_batch(filtered_rows)
+
+    print(f"Rows eligible: {len(filtered_rows)}")
+    print(f"Statistics prepared: {len(batch.statistics)}")
+    print(f"Mapping errors: {len(batch.mapping_errors)}")
+
+    if batch.mapping_errors:
+        print("\nMapping errors:")
+        for error in batch.mapping_errors[:10]:
+            print(error)
+        return 1
+
+    if not send:
+        external_client = build_external_ozon_ord_client_from_env()
+        resolved_statistics, resolution_errors = resolve_admin_statistics(
+            external_client, batch
+        )
+        print("\nDry run mode. Use --send to push data to Ozon ORD.")
+        print("\nStatistic payload preview:")
+        print(statistic_payloads_to_json(batch.statistics, limit=3))
+        if resolution_errors:
+            save_platform_errors(filtered_rows, resolution_errors)
+            print("\nResolution errors:")
+            for error in resolution_errors[:10]:
+                print(error)
+            print("\nSaved platform lookup errors to platform_errors.json")
+            return 1
+        print("\nAdmin statistic payload preview:")
+        print(
+            admin_statistic_payloads_to_json(
+                [item.payload for item in resolved_statistics],
+                limit=3,
+            )
+        )
+        return 0
+
+    external_client = build_external_ozon_ord_client_from_env()
+    admin_client = build_admin_ozon_ord_client_from_env()
+    resolved_statistics, resolution_errors = resolve_admin_statistics(
+        external_client, batch
+    )
+    if resolution_errors:
+        _publish_platform_errors(filtered_rows, resolution_errors)
+        raise OzonOrdApiError("\n".join(resolution_errors))
+
+    try:
+        response = sync_batch_skipping_duplicate_statistics(
+            external_client,
+            admin_client,
+            batch,
+            resolved_statistics,
+            on_duplicate_errors=lambda errors: _publish_platform_errors(
+                filtered_rows, errors
+            ),
+        )
+    except OzonOrdApiError as error:
+        message = str(error)
+        errors = message.splitlines()
+        if errors and (
+            "Platform not found:" in message
+            or "Platform matched more than one:" in message
+        ):
+            _publish_platform_errors(filtered_rows, errors)
+        raise
+    print(json.dumps(response, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _publish_platform_errors(rows: list[ParsedRow], errors: list[str]) -> None:
+    save_platform_errors(rows, errors)
+    apps_script_client = build_apps_script_client_from_env()
+    if apps_script_client is not None:
+        apps_script_client.update_platform_errors(
+            build_platform_error_rows(rows, errors)
+        )
