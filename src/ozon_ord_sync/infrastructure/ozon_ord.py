@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import asdict
 from typing import Any
 
-from ozon_ord_mapping import OzonOrdPlatformPayload, OzonOrdStatisticPayload
+from ozon_ord_sync.domain.models import OzonOrdPlatformPayload
 
 DEFAULT_BASE_URL = "https://ord.ozon.ru"
 
@@ -24,16 +23,6 @@ class ExternalOzonOrdClient:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-
-    @classmethod
-    def from_env(cls) -> "ExternalOzonOrdClient":
-        api_key = os.getenv("OZON_ORD_API_KEY")
-        if not api_key:
-            raise OzonOrdApiError("Environment variable OZON_ORD_API_KEY is required")
-
-        base_url = os.getenv("OZON_ORD_BASE_URL", DEFAULT_BASE_URL)
-        timeout = int(os.getenv("OZON_ORD_TIMEOUT", "30"))
-        return cls(api_key=api_key, base_url=base_url, timeout=timeout)
 
     def list_platforms(self, page_size: int = 1) -> dict[str, Any]:
         payload = {
@@ -124,24 +113,6 @@ class AdminOzonOrdClient:
         self.timeout = timeout
         self.app_name = app_name
         self.app_version = app_version
-
-    @classmethod
-    def from_env(cls) -> "AdminOzonOrdClient":
-        cookie_header = os.getenv("OZON_ORD_COOKIE")
-        if not cookie_header:
-            raise OzonOrdApiError("Environment variable OZON_ORD_COOKIE is required")
-
-        base_url = os.getenv("OZON_ORD_BASE_URL", DEFAULT_BASE_URL)
-        timeout = int(os.getenv("OZON_ORD_TIMEOUT", "30"))
-        app_name = os.getenv("OZON_ORD_APP_NAME", "ord-ui")
-        app_version = os.getenv("OZON_ORD_APP_VERSION", "release/OORD-2732")
-        return cls(
-            cookie_header=cookie_header,
-            base_url=base_url,
-            timeout=timeout,
-            app_name=app_name,
-            app_version=app_version,
-        )
 
     def add_statistics(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
         body = {"statistics": payloads}

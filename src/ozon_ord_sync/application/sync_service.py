@@ -2,39 +2,35 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
-from ozon_ord_api import AdminOzonOrdClient, ExternalOzonOrdClient, OzonOrdApiError
-from ozon_ord_mapping import (
+from ozon_ord_sync.domain.mapping import (
+    build_platform_payload,
+    build_platform_sheet_payload,
+    build_statistic_payload,
+)
+from ozon_ord_sync.domain.models import (
     OzonOrdAdminStatisticPayload,
     OzonOrdPlatformPayload,
     OzonOrdStatisticPayload,
-    build_platform_sheet_payload,
-    build_platform_payload,
-    build_statistic_payload,
+    ParsedPlatformRow,
+    ParsedRow,
+    PlatformSyncBatch,
+    ResolvedStatisticPayload,
+    SyncBatch,
 )
-from sheets_reader import ParsedPlatformRow, ParsedRow
+from ozon_ord_sync.infrastructure.ozon_ord import (
+    AdminOzonOrdClient,
+    ExternalOzonOrdClient,
+    OzonOrdApiError,
+)
 
 
-@dataclass
-class SyncBatch:
-    platforms: list[OzonOrdPlatformPayload]
-    statistics: list[OzonOrdStatisticPayload]
-    mapping_errors: list[str]
-
-
-@dataclass
-class PlatformSyncBatch:
-    platforms: list[OzonOrdPlatformPayload]
-    mapping_errors: list[str]
-
-
-@dataclass
-class ResolvedStatisticPayload:
-    row_number: int
-    payload: OzonOrdAdminStatisticPayload
+class PlatformErrorPayload(TypedDict):
+    rows: list[dict[str, object]]
+    errors: list[str]
 
 
 def build_sync_batch(rows: list[ParsedRow]) -> SyncBatch:
@@ -194,6 +190,62 @@ def sync_batch(
     }
 
 
+def sync_batch_skipping_duplicate_statistics(
+    external_client: ExternalOzonOrdClient,
+    admin_client: AdminOzonOrdClient,
+    batch: SyncBatch,
+    resolved_statistics: list[ResolvedStatisticPayload],
+    on_duplicate_errors: Callable[[list[str]], None] | None = None,
+) -> dict[str, object]:
+    duplicate_statistic_errors: list[str] = []
+    pending_statistics = resolved_statistics
+
+    while pending_statistics:
+        try:
+            response = sync_batch(
+                external_client,
+                admin_client,
+                batch,
+                resolved_statistics=pending_statistics,
+            )
+            break
+        except OzonOrdApiError as error:
+            message = str(error)
+            duplicate_row_numbers = extract_duplicate_statistic_row_numbers(
+                message, pending_statistics
+            )
+            if not duplicate_row_numbers:
+                raise
+
+            statistic_errors = extract_statistic_creation_errors(
+                message, pending_statistics
+            )
+            duplicate_statistic_errors.extend(
+                error_text
+                for error_text in statistic_errors
+                if error_text not in duplicate_statistic_errors
+            )
+            if on_duplicate_errors is not None:
+                on_duplicate_errors(duplicate_statistic_errors)
+
+            skipped_rows = set(duplicate_row_numbers)
+            next_pending_statistics = [
+                item
+                for item in pending_statistics
+                if item.row_number not in skipped_rows
+            ]
+            if len(next_pending_statistics) == len(pending_statistics):
+                raise
+            pending_statistics = next_pending_statistics
+    else:
+        response = {"statistic_response": None}
+
+    if duplicate_statistic_errors:
+        response["skipped_errors"] = duplicate_statistic_errors
+
+    return response
+
+
 def resolve_platform_ids(
     client: ExternalOzonOrdClient,
     external_platform_urls: dict[str, str],
@@ -308,7 +360,7 @@ def build_platform_error_rows(
 
 def build_platform_error_payload(
     rows: list[ParsedRow], errors: list[str]
-) -> dict[str, object]:
+) -> PlatformErrorPayload:
     error_by_external_platform_id: dict[str, str] = {}
     error_by_row_number: dict[int, str] = {}
     for error in errors:
@@ -321,26 +373,30 @@ def build_platform_error_payload(
             external_id = _normalize_platform_error_external_id(error.split(": ", 1)[1])
             error_by_external_platform_id[external_id] = "Найдено больше одной площадки"
 
-    return {
-        "rows": [
+    error_rows: list[dict[str, object]] = []
+    for row in rows:
+        row_error = error_by_row_number.get(row.row_number)
+        external_platform_id = _row_external_platform_id(row)
+        platform_error = (
+            error_by_external_platform_id.get(external_platform_id)
+            if external_platform_id is not None
+            else None
+        )
+        error = row_error or platform_error
+        if error is None:
+            continue
+
+        error_rows.append(
             {
                 "row_number": row.row_number,
                 "creative_id": row.creative_id,
                 "channel_url": row.channel_url,
-                "error": error_by_row_number.get(row.row_number)
-                or error_by_external_platform_id[_row_external_platform_id(row)],
-                "platform_error": error_by_row_number.get(row.row_number)
-                or error_by_external_platform_id[_row_external_platform_id(row)],
+                "error": error,
+                "platform_error": error,
             }
-            for row in rows
-            if row.row_number in error_by_row_number
-            or (
-                row.channel_url is not None
-                and _row_external_platform_id(row) in error_by_external_platform_id
-            )
-        ],
-        "errors": errors,
-    }
+        )
+
+    return {"rows": error_rows, "errors": errors}
 
 
 def _row_external_platform_id(row: ParsedRow) -> str | None:
@@ -387,11 +443,13 @@ def extract_duplicate_statistic_row_numbers(
     payload = _extract_json_payload_from_error_message(error_message)
     if payload is not None:
         for entry in _collect_duplicate_statistic_entries(payload):
-            row_number = (
-                entry.get("row_number")
-                or indexed_rows.get(entry.get("index"))
-                or creative_rows.get(entry.get("creative_id"))
-            )
+            row_number = entry.get("row_number")
+            index = entry.get("index")
+            creative_id = entry.get("creative_id")
+            if row_number is None and isinstance(index, int):
+                row_number = indexed_rows.get(index)
+            if row_number is None and isinstance(creative_id, str):
+                row_number = creative_rows.get(creative_id)
             if row_number:
                 row_numbers.add(row_number)
 

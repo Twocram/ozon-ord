@@ -1,103 +1,25 @@
 from __future__ import annotations
 
-import csv
 import json
 import re
 import urllib.parse
-import urllib.request
-from dataclasses import asdict, dataclass
+from collections.abc import Iterable
+from dataclasses import asdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from io import StringIO
-from typing import Any
+from itertools import islice
+from typing import Any, TypeVar
 
-
-DEFAULT_SHEET_URL = (
-    "https://docs.google.com/spreadsheets/d/"
-    "1PuvoA3GcHIger8bXYR0uY_jIhj_3LZ7ieypF1IcGcIw/edit?gid=0#gid=0"
+from ozon_ord_sync.domain.models import ParsedPlatformRow, ParsedRow, RowIssue
+from ozon_ord_sync.infrastructure.google_sheets import (
+    DEFAULT_PLATFORM_SHEET_NAME,
+    DEFAULT_SHEET_URL,
+    fetch_sheet_rows,
 )
-DEFAULT_PLATFORM_SHEET_NAME = "Лист3"
+
 TARGET_EXECUTOR = "100б"
 
-
-@dataclass
-class ParsedRow:
-    row_number: int
-    manager: str | None
-    month: date | None
-    platform: str | None
-    creative_id: str | None
-    channel_url: str | None
-    executor: str | None
-    contractor: str | None
-    price_with_tax: Decimal | None
-    publication_date: date | None
-    reach: int | None
-    mark: str | None
-    error: str | None
-    raw: dict[str, Any]
-
-
-@dataclass
-class ParsedPlatformRow:
-    row_number: int
-    name: str | None
-    url: str | None
-    raw: dict[str, Any]
-
-
-@dataclass
-class RowIssue:
-    row_number: int
-    messages: list[str]
-
-
-def google_sheet_csv_url(
-    sheet_url: str,
-    gid: str | int | None = None,
-    sheet_name: str | None = None,
-) -> str:
-    parsed = urllib.parse.urlparse(sheet_url)
-    path_match = re.search(r"/spreadsheets/d/([^/]+)", parsed.path)
-    if not path_match:
-        raise ValueError("Unsupported Google Sheets URL format")
-
-    sheet_id = path_match.group(1)
-    if sheet_name is not None:
-        return (
-            f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq"
-            f"?tqx=out:csv&sheet={urllib.parse.quote(sheet_name)}"
-        )
-
-    fragment_params = urllib.parse.parse_qs(parsed.fragment)
-    query_params = urllib.parse.parse_qs(parsed.query)
-    resolved_gid = str(
-        gid
-        if gid is not None
-        else fragment_params.get("gid", query_params.get("gid", ["0"]))[0]
-    )
-
-    return (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export"
-        f"?format=csv&gid={resolved_gid}"
-    )
-
-
-def fetch_sheet_rows(
-    sheet_url: str = DEFAULT_SHEET_URL,
-    gid: str | int | None = None,
-    sheet_name: str | None = None,
-) -> tuple[list[str], list[list[str]]]:
-    csv_url = google_sheet_csv_url(sheet_url, gid=gid, sheet_name=sheet_name)
-    with urllib.request.urlopen(csv_url, timeout=30) as response:
-        payload = response.read().decode("utf-8-sig")
-
-    reader = csv.reader(StringIO(payload))
-    rows = list(reader)
-    if not rows:
-        return [], []
-
-    return rows[0], rows[1:]
+ParsedSheetRow = TypeVar("ParsedSheetRow", ParsedRow, ParsedPlatformRow)
 
 
 def parse_sheet(sheet_url: str = DEFAULT_SHEET_URL) -> tuple[list[str], list[ParsedRow]]:
@@ -302,8 +224,8 @@ def slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", translit).strip("_")
 
 
-def rows_to_json(rows: list[ParsedRow], limit: int = 3) -> str:
-    payload = [asdict(row) for row in rows[:limit]]
+def rows_to_json(rows: Iterable[ParsedSheetRow], limit: int = 3) -> str:
+    payload = [asdict(row) for row in islice(rows, limit)]
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
