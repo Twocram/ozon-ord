@@ -22,7 +22,9 @@ TARGET_EXECUTOR = "100б"
 ParsedSheetRow = TypeVar("ParsedSheetRow", ParsedRow, ParsedPlatformRow)
 
 
-def parse_sheet(sheet_url: str = DEFAULT_SHEET_URL) -> tuple[list[str], list[ParsedRow]]:
+def parse_sheet(
+    sheet_url: str = DEFAULT_SHEET_URL,
+) -> tuple[list[str], list[ParsedRow]]:
     header, rows = fetch_sheet_rows(sheet_url)
     normalized_header = normalize_header(header)
 
@@ -37,7 +39,9 @@ def parse_sheet(sheet_url: str = DEFAULT_SHEET_URL) -> tuple[list[str], list[Par
                 row_number=offset,
                 manager=text_or_none(raw_row.get("manager")),
                 month=parse_date(raw_row.get("month")),
-                platform=text_or_none(raw_row.get("platform") or raw_row.get("ploschadka")),
+                platform=text_or_none(
+                    raw_row.get("platform") or raw_row.get("ploschadka")
+                ),
                 creative_id=text_or_none(raw_row.get("creative")),
                 channel_url=text_or_none(
                     raw_row.get("channel_url")
@@ -52,7 +56,9 @@ def parse_sheet(sheet_url: str = DEFAULT_SHEET_URL) -> tuple[list[str], list[Par
                 publication_date=parse_date(raw_row.get("publication_date")),
                 reach=parse_int(raw_row.get("reach")),
                 mark=text_or_none(raw_row.get("mark")),
-                error=text_or_none(raw_row.get("error") or raw_row.get("platform_error")),
+                error=text_or_none(
+                    raw_row.get("error") or raw_row.get("platform_error")
+                ),
                 raw=raw_row,
             )
         )
@@ -233,11 +239,7 @@ def filter_rows_for_processing(
     rows: list[ParsedRow], target_executor: str = TARGET_EXECUTOR
 ) -> list[ParsedRow]:
     target = _normalize_executor_value(target_executor)
-    return [
-        row
-        for row in rows
-        if _normalize_executor_value(row.executor) == target
-    ]
+    return [row for row in rows if _normalize_executor_value(row.executor) == target]
 
 
 def validate_rows(rows: list[ParsedRow]) -> list[RowIssue]:
