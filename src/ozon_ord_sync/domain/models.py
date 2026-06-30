@@ -18,6 +18,7 @@ class ParsedRow:
     contractor: str | None
     price_with_tax: Decimal | None
     publication_date: date | None
+    display_date: date | None
     reach: int | None
     mark: str | None
     error: str | None

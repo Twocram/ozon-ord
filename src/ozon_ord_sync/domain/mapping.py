@@ -54,7 +54,11 @@ def map_row_to_ozon_ord_payload(row: ParsedRow) -> OzonOrdPayload:
         raise ValueError(f"Row {row.row_number}: missing required mapping fields")
 
     display_start_date = publication_date
-    display_end_date = publication_date + timedelta(days=1)
+    display_end_date = (
+        row.display_date
+        if row.display_date is not None
+        else publication_date + timedelta(days=1)
+    )
 
     return OzonOrdPayload(
         row_number=row.row_number,
