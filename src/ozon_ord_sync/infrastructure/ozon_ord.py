@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -115,29 +116,72 @@ class AdminOzonOrdClient:
         self.app_version = app_version
 
     def add_statistics(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
+        # ponytail: ORD rejects urllib here; curl matches the browser request without adding deps.
         body = {"statistics": payloads}
-        endpoint = "/api/ord/admin/v6/statistic?__rr=1"
-        url = f"{self.base_url}{endpoint}"
-        request = urllib.request.Request(
-            url=url,
-            data=json.dumps(body, default=str).encode("utf-8"),
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "ru",
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15"
-                ),
-                "Origin": self.base_url,
-                "Referer": f"{self.base_url}/statistics/new",
-                "Cookie": self.cookie_header,
-                "X-O3-App-Name": self.app_name,
-                "X-O3-App-Version": self.app_version,
-            },
+        url = f"{self.base_url}/api/ord/admin/v6/statistic?__rr=1"
+        result = subprocess.run(
+            [
+                "curl",
+                "--silent",
+                "--show-error",
+                "--location",
+                "--max-time",
+                str(self.timeout),
+                "--write-out",
+                "\n%{http_code}",
+                url,
+                "-X",
+                "POST",
+                "-H",
+                "accept: application/json, text/plain, */*",
+                "-H",
+                "accept-language: en-US,en;q=0.6",
+                "-H",
+                "cache-control: no-cache",
+                "-H",
+                "content-type: application/json",
+                "-H",
+                f"cookie: {self.cookie_header}",
+                "-H",
+                f"origin: {self.base_url}",
+                "-H",
+                "pragma: no-cache",
+                "-H",
+                f"referer: {self.base_url}/statistics/new",
+                "-H",
+                'sec-ch-ua: "Brave";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
+                "-H",
+                "sec-ch-ua-mobile: ?0",
+                "-H",
+                'sec-ch-ua-platform: "macOS"',
+                "-H",
+                "sec-fetch-dest: empty",
+                "-H",
+                "sec-fetch-mode: cors",
+                "-H",
+                "sec-fetch-site: same-origin",
+                "-H",
+                "sec-gpc: 1",
+                "-H",
+                "user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+                "-H",
+                f"x-o3-app-name: {self.app_name}",
+                "-H",
+                f"x-o3-app-version: {self.app_version}",
+                "--data-raw",
+                json.dumps(body, default=str),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        return _perform_json_request(request, timeout=self.timeout)
+        if result.returncode != 0:
+            raise OzonOrdApiError(result.stderr.strip() or "curl failed")
+
+        raw, _, status = result.stdout.rpartition("\n")
+        if not status.isdigit() or int(status) >= 400:
+            raise OzonOrdApiError(f"POST {url} failed with HTTP {status}: {raw}")
+        return json.loads(raw) if raw else {}
 
 
 def _perform_json_request(
