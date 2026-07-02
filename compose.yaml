@@ -1,0 +1,10 @@
+services:
+  api:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./.runtime:/app/.runtime
+    command: ["ozon-ord-sync", "api", "--api-host", "0.0.0.0", "--api-port", "8765"]
