@@ -8,6 +8,7 @@ from ozon_ord_sync.application.sheet_parser import (
     parse_platform_sheet,
     parse_sheet,
     validate_platform_rows,
+    validate_rows,
 )
 from ozon_ord_sync.application.sync_service import (
     build_platform_error_rows,
@@ -23,8 +24,29 @@ from ozon_ord_sync.config.factories import (
     build_apps_script_client_from_env,
     build_external_ozon_ord_client_from_env,
 )
-from ozon_ord_sync.domain.models import ParsedRow
+from ozon_ord_sync.domain.models import (
+    ParsedPlatformRow,
+    ParsedRow,
+    PlatformSyncBatch,
+    RowIssue,
+)
 from ozon_ord_sync.infrastructure.ozon_ord import OzonOrdApiError
+
+
+@dataclass
+class PlatformPreviewResult:
+    ok: bool
+    sheet_name: str
+    rows_parsed: int
+    rows_with_issues: int
+    platforms_prepared: int
+    mapping_errors: list[str]
+    issues: list[str]
+    sample_rows: list[dict[str, Any]]
+    sample_platforms: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -44,6 +66,23 @@ class PlatformSyncResult:
 
 
 @dataclass
+class StatisticsPreviewResult:
+    ok: bool
+    rows_parsed: int
+    rows_eligible: int
+    rows_skipped_by_executor: int
+    rows_with_issues: int
+    statistics_prepared: int
+    mapping_errors: list[str]
+    issues: list[str]
+    sample_rows: list[dict[str, Any]]
+    sample_statistics: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class StatisticsSyncResult:
     ok: bool
     rows_eligible: int
@@ -57,17 +96,36 @@ class StatisticsSyncResult:
         return asdict(self)
 
 
+def run_platform_preview(
+    sheet_url: str,
+    sheet_name: str,
+    limit: int = 3,
+) -> PlatformPreviewResult:
+    rows, issues, batch, issue_messages = _prepare_platform_batch(
+        sheet_url, sheet_name
+    )
+
+    return PlatformPreviewResult(
+        ok=not issues and not batch.mapping_errors,
+        sheet_name=sheet_name,
+        rows_parsed=len(rows),
+        rows_with_issues=len(issues),
+        platforms_prepared=len(batch.platforms),
+        mapping_errors=batch.mapping_errors,
+        issues=issue_messages,
+        sample_rows=_sample_rows(rows, limit),
+        sample_platforms=_sample_rows(batch.platforms, limit),
+    )
+
+
 def run_platform_sync(
     sheet_url: str,
     sheet_name: str,
     send: bool,
 ) -> PlatformSyncResult:
-    _, rows = parse_platform_sheet(sheet_url, sheet_name=sheet_name)
-    issues = validate_platform_rows(rows)
-    batch = build_platform_sync_batch(rows)
-    issue_messages = [
-        f"Row {issue.row_number}: {', '.join(issue.messages)}" for issue in issues
-    ]
+    rows, issues, batch, issue_messages = _prepare_platform_batch(
+        sheet_url, sheet_name
+    )
 
     result = PlatformSyncResult(
         ok=not issues and not batch.mapping_errors,
@@ -85,6 +143,32 @@ def run_platform_sync(
     external_client = build_external_ozon_ord_client_from_env()
     result.ozon_response = sync_platform_batch(external_client, batch)
     return result
+
+
+def run_statistics_preview(
+    sheet_url: str,
+    limit: int = 3,
+) -> StatisticsPreviewResult:
+    _, rows = parse_sheet(sheet_url)
+    filtered_rows = filter_rows_for_processing(rows)
+    issues = validate_rows(filtered_rows)
+    batch = build_sync_batch(filtered_rows)
+    issue_messages = [
+        f"Row {issue.row_number}: {', '.join(issue.messages)}" for issue in issues
+    ]
+
+    return StatisticsPreviewResult(
+        ok=not issues and not batch.mapping_errors,
+        rows_parsed=len(rows),
+        rows_eligible=len(filtered_rows),
+        rows_skipped_by_executor=len(rows) - len(filtered_rows),
+        rows_with_issues=len(issues),
+        statistics_prepared=len(batch.statistics),
+        mapping_errors=batch.mapping_errors,
+        issues=issue_messages,
+        sample_rows=_sample_rows(filtered_rows, limit),
+        sample_statistics=_sample_rows(batch.statistics, limit),
+    )
 
 
 def run_statistics_sync(sheet_url: str, send: bool) -> StatisticsSyncResult:
@@ -149,3 +233,25 @@ def _publish_platform_errors(rows: list[ParsedRow], errors: list[str]) -> None:
         apps_script_client.update_platform_errors(
             build_platform_error_rows(rows, errors)
         )
+
+
+def _prepare_platform_batch(
+    sheet_url: str,
+    sheet_name: str,
+) -> tuple[
+    list[ParsedPlatformRow],
+    list[RowIssue],
+    PlatformSyncBatch,
+    list[str],
+]:
+    _, rows = parse_platform_sheet(sheet_url, sheet_name=sheet_name)
+    issues = validate_platform_rows(rows)
+    batch = build_platform_sync_batch(rows)
+    issue_messages = [
+        f"Row {issue.row_number}: {', '.join(issue.messages)}" for issue in issues
+    ]
+    return rows, issues, batch, issue_messages
+
+
+def _sample_rows(rows: list[Any], limit: int) -> list[dict[str, Any]]:
+    return [asdict(row) for row in rows[: max(limit, 0)]]

@@ -5,9 +5,12 @@ import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import urlsplit
 
 from ozon_ord_sync.application.sync_workflows import (
+    run_platform_preview,
     run_platform_sync,
+    run_statistics_preview,
     run_statistics_sync,
 )
 from ozon_ord_sync.config.runtime_auth import (
@@ -19,6 +22,7 @@ from ozon_ord_sync.infrastructure.google_sheets import (
     DEFAULT_PLATFORM_SHEET_NAME,
     DEFAULT_SHEET_URL,
 )
+from ozon_ord_sync.infrastructure.ozon_ord import OzonOrdApiError
 
 API_TOKEN_ENV = "OZON_ORD_SYNC_API_TOKEN"
 DEFAULT_HOST = "127.0.0.1"
@@ -46,7 +50,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True})
 
     def do_GET(self) -> None:
-        if self.path != "/api/status":
+        if self._path() != "/api/status":
             self._send_error(HTTPStatus.NOT_FOUND, "unknown endpoint")
             return
         if not self._authorize():
@@ -59,7 +63,9 @@ class _ApiHandler(BaseHTTPRequestHandler):
                 **cookie_status,
                 "hasExternalApiKey": bool(os.getenv("OZON_ORD_API_KEY")),
                 "hasApiToken": bool(os.getenv(API_TOKEN_ENV)),
+                "hasAppsScript": bool(os.getenv("GOOGLE_APPS_SCRIPT_WEB_APP_URL")),
                 "defaultSheetUrlConfigured": bool(DEFAULT_SHEET_URL),
+                "defaultPlatformSheetName": DEFAULT_PLATFORM_SHEET_NAME,
             }
         )
 
@@ -69,17 +75,27 @@ class _ApiHandler(BaseHTTPRequestHandler):
 
         try:
             payload = self._read_json()
-            if self.path == "/api/auth/ozon-cookie":
+            path = self._path()
+            if path == "/api/auth/ozon-cookie":
                 self._handle_ozon_cookie(payload)
                 return
-            if self.path == "/api/sync/statistics":
+            if path == "/api/preview/statistics":
+                self._handle_statistics_preview(payload)
+                return
+            if path == "/api/preview/platforms":
+                self._handle_platform_preview(payload)
+                return
+            if path == "/api/sync/statistics":
                 self._handle_statistics_sync(payload)
                 return
-            if self.path == "/api/sync/platforms":
+            if path == "/api/sync/platforms":
                 self._handle_platform_sync(payload)
                 return
         except ValueError as error:
             self._send_error(HTTPStatus.BAD_REQUEST, str(error))
+            return
+        except OzonOrdApiError as error:
+            self._send_error(HTTPStatus.BAD_GATEWAY, str(error))
             return
         except Exception as error:
             self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
@@ -97,6 +113,9 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._send_error(HTTPStatus.UNAUTHORIZED, "unauthorized")
             return False
         return True
+
+    def _path(self) -> str:
+        return urlsplit(self.path).path
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
@@ -125,21 +144,97 @@ class _ApiHandler(BaseHTTPRequestHandler):
             }
         )
 
+    def _handle_statistics_preview(self, payload: dict[str, Any]) -> None:
+        result = run_statistics_preview(
+            sheet_url=self._sheet_url(payload),
+            limit=self._read_int(payload, "limit", default=3, minimum=0),
+        )
+        self._send_json(
+            result.to_dict(),
+            status=HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST,
+        )
+
+    def _handle_platform_preview(self, payload: dict[str, Any]) -> None:
+        result = run_platform_preview(
+            sheet_url=self._sheet_url(payload),
+            sheet_name=self._platform_sheet_name(payload),
+            limit=self._read_int(payload, "limit", default=3, minimum=0),
+        )
+        self._send_json(
+            result.to_dict(),
+            status=HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST,
+        )
+
     def _handle_statistics_sync(self, payload: dict[str, Any]) -> None:
         apply_stored_ozon_cookie()
-        sheet_url = str(payload.get("sheetUrl") or DEFAULT_SHEET_URL)
-        dry_run = bool(payload.get("dryRun", False))
-        result = run_statistics_sync(sheet_url, send=not dry_run)
-        self._send_json(result.to_dict(), status=HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST)
+        result = run_statistics_sync(
+            self._sheet_url(payload),
+            send=not self._read_bool(payload, "dryRun", default=False),
+        )
+        self._send_json(
+            result.to_dict(),
+            status=HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST,
+        )
 
     def _handle_platform_sync(self, payload: dict[str, Any]) -> None:
-        sheet_url = str(payload.get("sheetUrl") or DEFAULT_SHEET_URL)
-        sheet_name = str(payload.get("platformSheetName") or DEFAULT_PLATFORM_SHEET_NAME)
-        dry_run = bool(payload.get("dryRun", False))
-        result = run_platform_sync(sheet_url, sheet_name, send=not dry_run)
-        self._send_json(result.to_dict(), status=HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST)
+        result = run_platform_sync(
+            self._sheet_url(payload),
+            self._platform_sheet_name(payload),
+            send=not self._read_bool(payload, "dryRun", default=False),
+        )
+        self._send_json(
+            result.to_dict(),
+            status=HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST,
+        )
 
-    def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+    def _sheet_url(self, payload: dict[str, Any]) -> str:
+        return str(payload.get("sheetUrl") or DEFAULT_SHEET_URL)
+
+    def _platform_sheet_name(self, payload: dict[str, Any]) -> str:
+        return str(payload.get("platformSheetName") or DEFAULT_PLATFORM_SHEET_NAME)
+
+    def _read_bool(
+        self,
+        payload: dict[str, Any],
+        key: str,
+        *,
+        default: bool,
+    ) -> bool:
+        value = payload.get(key, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off", ""}:
+                return False
+        raise ValueError(f"{key} must be a boolean")
+
+    def _read_int(
+        self,
+        payload: dict[str, Any],
+        key: str,
+        *,
+        default: int,
+        minimum: int | None = None,
+    ) -> int:
+        value = payload.get(key, default)
+        if isinstance(value, bool):
+            raise ValueError(f"{key} must be an integer")
+        try:
+            number = int(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{key} must be an integer") from error
+        if minimum is not None and number < minimum:
+            raise ValueError(f"{key} must be >= {minimum}")
+        return number
+
+    def _send_json(
+        self,
+        payload: dict[str, Any],
+        status: HTTPStatus = HTTPStatus.OK,
+    ) -> None:
         body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")

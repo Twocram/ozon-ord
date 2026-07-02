@@ -27,6 +27,8 @@ It exposes local extension-facing endpoints:
 
 - `GET /api/status`
 - `POST /api/auth/ozon-cookie`
+- `POST /api/preview/statistics`
+- `POST /api/preview/platforms`
 - `POST /api/sync/statistics`
 - `POST /api/sync/platforms`
 
