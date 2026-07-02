@@ -5,7 +5,7 @@ import re
 import urllib.parse
 from collections.abc import Iterable
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from itertools import islice
 from typing import Any, TypeVar
@@ -54,6 +54,7 @@ def parse_sheet(
                     raw_row.get("price_with_tax") or raw_row.get("tsena")
                 ),
                 publication_date=parse_date(raw_row.get("publication_date")),
+                display_date=parse_date(raw_row.get("display_date")),
                 reach=parse_int(raw_row.get("reach")),
                 mark=text_or_none(raw_row.get("mark")),
                 error=text_or_none(
@@ -117,6 +118,7 @@ def normalize_header(header: list[str]) -> list[str]:
         "tsena": "price_with_tax",
         "tsena_s_nalogom": "price_with_tax",
         "data_vyhoda": "publication_date",
+        "data_pokazov": "display_date",
         "ohvat": "reach",
         "mark": "mark",
         "oshibka": "error",
@@ -164,6 +166,11 @@ def parse_date(value: Any) -> date | None:
     text = text_or_none(value)
     if text is None:
         return None
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            pass
     return date.fromisoformat(text)
 
 

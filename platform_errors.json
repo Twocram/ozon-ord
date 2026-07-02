@@ -1,7 +1,86 @@
 {
-  "rows": [],
+  "rows": [
+    {
+      "row_number": 5,
+      "creative_id": "2W5zFJ9Awbo",
+      "channel_url": "https://t.me/clshnvnovels",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 9,
+      "creative_id": "2W5zFHUdGGq",
+      "channel_url": "https://t.me/scmokilzz",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 14,
+      "creative_id": "2W5zFJN5JY9",
+      "channel_url": "https://t.me/+yz0LoTGHlYIxMzZk",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 19,
+      "creative_id": "2W5zFGq945F",
+      "channel_url": "https://t.me/mmarssikk",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 53,
+      "creative_id": "2W5zFGQ1yBF",
+      "channel_url": "https://t.me/unpleasent",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 97,
+      "creative_id": "2W5zFK4L55b",
+      "channel_url": "https://t.me/qeqoqeq_stream",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 98,
+      "creative_id": "2W5zFGc1bWR",
+      "channel_url": "https://t.me/serega_pirat2",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 107,
+      "creative_id": "2W5zFGTLS7j",
+      "channel_url": "https://t.me/tamokkka",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 150,
+      "creative_id": "2W5zFJhr2zm",
+      "channel_url": "t.me/smrksm",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    },
+    {
+      "row_number": 155,
+      "creative_id": "2W5zFHNGoSy",
+      "channel_url": "https://t.me/vellockaaa",
+      "error": "Площадка не найдена",
+      "platform_error": "Площадка не найдена"
+    }
+  ],
   "errors": [
-    "Creative marker not found: Snimsi",
-    "Creative not found for marker=Snimsi"
+    "Platform not found: externalPlatformId=t_me_clshnvnovels_15b17e1488",
+    "Platform not found: externalPlatformId=t_me_scmokilzz_1128472684",
+    "Platform not found: externalPlatformId=t_me_yz0lotghlyixmzzk_82cf4a652d",
+    "Platform not found: externalPlatformId=t_me_mmarssikk_c3b860c821",
+    "Platform not found: externalPlatformId=t_me_unpleasent_1b6cddcace",
+    "Platform not found: externalPlatformId=t_me_qeqoqeq_stream_92e0a5c392",
+    "Platform not found: externalPlatformId=t_me_serega_pirat2_e7676ebd74",
+    "Platform not found: externalPlatformId=t_me_tamokkka_49799ba95d",
+    "Platform not found: externalPlatformId=t_me_smrksm_a4b1603154",
+    "Platform not found: externalPlatformId=t_me_vellockaaa_c4fb0d3b71"
   ]
 }
