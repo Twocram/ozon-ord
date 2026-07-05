@@ -39,7 +39,11 @@ def save_ozon_cookie(
         updated_at=datetime.now(timezone.utc).isoformat(),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(stored.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(stored.__dict__, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
     os.environ["OZON_ORD_COOKIE"] = stored.cookie
     os.environ["OZON_ORD_BASE_URL"] = stored.base_url
     return stored

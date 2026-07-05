@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from http import HTTPStatus
@@ -28,6 +29,7 @@ from ozon_ord_sync.infrastructure.ozon_ord import OzonOrdApiError
 API_TOKEN_ENV = "OZON_ORD_SYNC_API_TOKEN"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+MAX_REQUEST_BODY_BYTES = 1024 * 1024
 
 
 class ApiServerError(RuntimeError):
@@ -113,7 +115,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
     def _authorize(self) -> bool:
         expected = os.getenv(API_TOKEN_ENV)
         header = self.headers.get("Authorization", "")
-        if not expected or header != f"Bearer {expected}":
+        if not expected or not hmac.compare_digest(header, f"Bearer {expected}"):
             self._send_error(HTTPStatus.UNAUTHORIZED, "unauthorized")
             return False
         return True
@@ -125,6 +127,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
             return {}
+        if length > MAX_REQUEST_BODY_BYTES:
+            raise ValueError("request body is too large")
         raw = self.rfile.read(length).decode("utf-8")
         data = json.loads(raw)
         if not isinstance(data, dict):

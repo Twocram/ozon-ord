@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import sys
 import unittest
 from datetime import date
@@ -11,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ozon_ord_sync.application.sync_workflows import run_statistics_preview
 from ozon_ord_sync.domain.models import OzonOrdStatisticPayload, ParsedRow, RowIssue, SyncBatch
-from ozon_ord_sync.infrastructure.api_server import _ApiHandler
+from ozon_ord_sync.infrastructure.api_server import MAX_REQUEST_BODY_BYTES, _ApiHandler
 from ozon_ord_sync.infrastructure.ozon_ord import CookieValidationResult
 
 
@@ -30,6 +31,14 @@ class ApiHandlerHelpersTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             handler._read_bool({"dryRun": "maybe"}, "dryRun", default=False)
+
+    def test_read_json_rejects_large_body(self) -> None:
+        handler = object.__new__(_ApiHandler)
+        handler.headers = {"Content-Length": str(MAX_REQUEST_BODY_BYTES + 1)}
+        handler.rfile = io.BytesIO(b"")
+
+        with self.assertRaises(ValueError):
+            handler._read_json()
 
 
 class AuthValidateHandlerTest(unittest.TestCase):
