@@ -124,7 +124,8 @@ cd <deploy-path>
 git fetch origin
 git checkout main
 git reset --hard origin/main
-docker compose up -d --build --remove-orphans api bot
+# deploy script uses docker compose if available, otherwise docker-compose
+$COMPOSE up -d --build --remove-orphans api bot
 docker image prune -f
 ```
 
@@ -149,7 +150,11 @@ Check it manually on the VPS:
 ```bash
 cd /home/deploy/ozon-ord
 git fetch origin
+# new Compose plugin:
 docker compose up -d --build api bot
+
+# old Compose binary:
+docker-compose up -d --build api bot
 ```
 
 If the repo is private, configure SSH deploy key or another git auth method on the VPS first.
