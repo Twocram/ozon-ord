@@ -125,6 +125,7 @@ git fetch origin
 git checkout main
 git reset --hard origin/main
 # deploy script uses docker compose if available, otherwise docker-compose
+$COMPOSE rm -sf api bot || true
 $COMPOSE up -d --build --remove-orphans api bot
 docker image prune -f
 ```
