@@ -5,7 +5,7 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from ozon_ord_sync.domain.models import OzonOrdPlatformPayload
@@ -15,6 +15,13 @@ DEFAULT_BASE_URL = "https://ord.ozon.ru"
 
 class OzonOrdApiError(RuntimeError):
     pass
+
+
+@dataclass
+class CookieValidationResult:
+    is_valid: bool | None
+    status_code: int | None
+    error: str | None = None
 
 
 class ExternalOzonOrdClient:
@@ -116,8 +123,35 @@ class AdminOzonOrdClient:
         self.app_version = app_version
 
     def add_statistics(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
+        raw, status, url = self._post_statistics({"statistics": payloads})
+        if status >= 400:
+            raise OzonOrdApiError(f"POST {url} failed with HTTP {status}: {raw}")
+        return json.loads(raw) if raw else {}
+
+    def validate_cookie(self) -> CookieValidationResult:
+        try:
+            raw, status, _ = self._post_statistics({"statistics": []})
+        except OzonOrdApiError as error:
+            return CookieValidationResult(is_valid=None, status_code=None, error=str(error))
+
+        if status in {401, 403}:
+            return CookieValidationResult(
+                is_valid=False,
+                status_code=status,
+                error=_response_error_text(raw) or f"HTTP {status}",
+            )
+
+        if 200 <= status < 300 or status in {400, 405, 422}:
+            return CookieValidationResult(is_valid=True, status_code=status)
+
+        return CookieValidationResult(
+            is_valid=None,
+            status_code=status,
+            error=_response_error_text(raw) or f"HTTP {status}",
+        )
+
+    def _post_statistics(self, body: dict[str, Any]) -> tuple[str, int, str]:
         # ponytail: ORD rejects urllib here; curl matches the browser request without adding deps.
-        body = {"statistics": payloads}
         url = f"{self.base_url}/api/ord/admin/v6/statistic?__rr=1"
         result = subprocess.run(
             [
@@ -179,9 +213,25 @@ class AdminOzonOrdClient:
             raise OzonOrdApiError(result.stderr.strip() or "curl failed")
 
         raw, _, status = result.stdout.rpartition("\n")
-        if not status.isdigit() or int(status) >= 400:
-            raise OzonOrdApiError(f"POST {url} failed with HTTP {status}: {raw}")
-        return json.loads(raw) if raw else {}
+        if not status.isdigit():
+            raise OzonOrdApiError(f"POST {url} failed: missing HTTP status")
+        return raw, int(status), url
+
+
+def _response_error_text(raw: str) -> str | None:
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(payload, dict):
+        for key in ("error", "message", "detail", "description"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return text
 
 
 def _perform_json_request(

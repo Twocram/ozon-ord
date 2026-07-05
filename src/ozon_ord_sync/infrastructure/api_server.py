@@ -22,6 +22,7 @@ from ozon_ord_sync.infrastructure.google_sheets import (
     DEFAULT_PLATFORM_SHEET_NAME,
     DEFAULT_SHEET_URL,
 )
+from ozon_ord_sync.config.factories import build_admin_ozon_ord_client_from_env
 from ozon_ord_sync.infrastructure.ozon_ord import OzonOrdApiError
 
 API_TOKEN_ENV = "OZON_ORD_SYNC_API_TOKEN"
@@ -78,6 +79,9 @@ class _ApiHandler(BaseHTTPRequestHandler):
             path = self._path()
             if path == "/api/auth/ozon-cookie":
                 self._handle_ozon_cookie(payload)
+                return
+            if path == "/api/auth/validate":
+                self._handle_auth_validate()
                 return
             if path == "/api/preview/statistics":
                 self._handle_statistics_preview(payload)
@@ -142,6 +146,50 @@ class _ApiHandler(BaseHTTPRequestHandler):
                 "updatedAt": stored.updated_at,
                 "baseUrl": stored.base_url,
             }
+        )
+
+    def _handle_auth_validate(self) -> None:
+        apply_stored_ozon_cookie()
+        cookie_status = stored_cookie_status()
+        if not cookie_status["hasOzonCookie"]:
+            self._send_json(
+                {
+                    "ok": False,
+                    **cookie_status,
+                    "cookieValid": None,
+                    "validationError": "cookie is not set",
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        validation = build_admin_ozon_ord_client_from_env().validate_cookie()
+        if validation.is_valid is True:
+            self._send_json(
+                {
+                    "ok": True,
+                    **cookie_status,
+                    "cookieValid": True,
+                    "validationStatusCode": validation.status_code,
+                    "validationError": None,
+                }
+            )
+            return
+
+        status = (
+            HTTPStatus.UNAUTHORIZED
+            if validation.is_valid is False
+            else HTTPStatus.BAD_GATEWAY
+        )
+        self._send_json(
+            {
+                "ok": False,
+                **cookie_status,
+                "cookieValid": validation.is_valid,
+                "validationStatusCode": validation.status_code,
+                "validationError": validation.error,
+            },
+            status=status,
         )
 
     def _handle_statistics_preview(self, payload: dict[str, Any]) -> None:

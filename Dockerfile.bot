@@ -1,0 +1,13 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+RUN pip install --no-cache-dir . "python-telegram-bot~=22.0"
+
+CMD ["python", "-c", "from ozon_ord_sync.infrastructure.telegram_bot import run_telegram_bot; run_telegram_bot()"]

@@ -16,6 +16,7 @@ The project is now packaged as `ozon_ord_sync` under `src/`. This keeps imports 
 - `ozon_ord_sync.infrastructure.ozon_ord` — Ozon ORD HTTP clients.
 - `ozon_ord_sync.infrastructure.apps_script` — Google Apps Script HTTP client for writing platform errors back.
 - `ozon_ord_sync.infrastructure.api_server` — local JSON HTTP API for browser-extension actions.
+- `ozon_ord_sync.infrastructure.telegram_bot` — Telegram bot that triggers uploads via the local API.
 - `ozon_ord_sync.config.env` — `.env` loading utility.
 - `ozon_ord_sync.config.factories` — environment-based client factories.
 - `ozon_ord_sync.config.runtime_auth` — runtime Ozon cookie storage under `.runtime/`.
@@ -27,6 +28,7 @@ It exposes local extension-facing endpoints:
 
 - `GET /api/status`
 - `POST /api/auth/ozon-cookie`
+- `POST /api/auth/validate`
 - `POST /api/preview/statistics`
 - `POST /api/preview/platforms`
 - `POST /api/sync/statistics`
@@ -43,7 +45,7 @@ Observed boundaries:
 - `application.sync_service` coordinates batch creation, Ozon ID resolution, sync submission, duplicate-statistic retries, and platform error report generation.
 - `domain.models` and `domain.mapping` are pure dataclasses/transformation logic.
 - `infrastructure.google_sheets` owns only Google Sheets CSV URL building and transport; parsing/validation lives in `application.sheet_parser`.
-- `infrastructure.ozon_ord`, `infrastructure.apps_script`, and `infrastructure.api_server` own HTTP access; environment-based construction lives in `config.factories`.
+- `infrastructure.ozon_ord`, `infrastructure.apps_script`, `infrastructure.api_server`, and `infrastructure.telegram_bot` own HTTP/chat integration; environment-based construction lives in `config.factories`.
 
 ## Target direction
 
@@ -69,6 +71,7 @@ ozon_ord_sync/
     google_sheets.py
     ozon_ord.py
     apps_script.py
+    telegram_bot.py
 ```
 
 The next safe step is to create the separate browser extension repository that calls the API endpoints.

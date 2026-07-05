@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ozon_ord_sync.application.sync_workflows import run_statistics_preview
 from ozon_ord_sync.domain.models import OzonOrdStatisticPayload, ParsedRow, RowIssue, SyncBatch
 from ozon_ord_sync.infrastructure.api_server import _ApiHandler
+from ozon_ord_sync.infrastructure.ozon_ord import CookieValidationResult
 
 
 class ApiHandlerHelpersTest(unittest.TestCase):
@@ -29,6 +30,59 @@ class ApiHandlerHelpersTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             handler._read_bool({"dryRun": "maybe"}, "dryRun", default=False)
+
+
+class AuthValidateHandlerTest(unittest.TestCase):
+    def test_auth_validate_without_cookie_returns_400_payload(self) -> None:
+        handler = object.__new__(_ApiHandler)
+        payloads: list[tuple[dict[str, object], int]] = []
+        handler._send_json = lambda payload, status=200: payloads.append((payload, status))
+
+        with patch(
+            "ozon_ord_sync.infrastructure.api_server.apply_stored_ozon_cookie"
+        ), patch(
+            "ozon_ord_sync.infrastructure.api_server.stored_cookie_status",
+            return_value={
+                "hasOzonCookie": False,
+                "cookieEntries": 0,
+                "cookieUpdatedAt": None,
+                "baseUrl": None,
+            },
+        ):
+            handler._handle_auth_validate()
+
+        self.assertEqual(payloads[0][1], 400)
+        self.assertEqual(payloads[0][0]["cookieValid"], None)
+
+    def test_auth_validate_with_valid_cookie_returns_200_payload(self) -> None:
+        handler = object.__new__(_ApiHandler)
+        payloads: list[tuple[dict[str, object], int]] = []
+        handler._send_json = lambda payload, status=200: payloads.append((payload, status))
+        client = type(
+            "Client",
+            (),
+            {"validate_cookie": lambda self: CookieValidationResult(True, 400, None)},
+        )()
+
+        with patch(
+            "ozon_ord_sync.infrastructure.api_server.apply_stored_ozon_cookie"
+        ), patch(
+            "ozon_ord_sync.infrastructure.api_server.stored_cookie_status",
+            return_value={
+                "hasOzonCookie": True,
+                "cookieEntries": 3,
+                "cookieUpdatedAt": "now",
+                "baseUrl": "https://ord.ozon.ru",
+            },
+        ), patch(
+            "ozon_ord_sync.infrastructure.api_server.build_admin_ozon_ord_client_from_env",
+            return_value=client,
+        ):
+            handler._handle_auth_validate()
+
+        self.assertEqual(payloads[0][1], 200)
+        self.assertEqual(payloads[0][0]["cookieValid"], True)
+        self.assertEqual(payloads[0][0]["validationStatusCode"], 400)
 
 
 class StatisticsPreviewWorkflowTest(unittest.TestCase):
