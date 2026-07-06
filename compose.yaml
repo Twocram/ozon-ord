@@ -17,3 +17,15 @@ services:
       - .env
     depends_on:
       - api
+
+  browser:
+    image: lscr.io/linuxserver/chromium:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Moscow
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./.runtime/browser-config:/config
+    shm_size: "1gb"

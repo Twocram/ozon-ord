@@ -39,19 +39,50 @@ OZON_ORD_SYNC_API_TOKEN=change-me
 OZON_ORD_SYNC_API_BASE_URL=http://api:8765
 ```
 
-Then start both services:
+Then start services:
 
 ```bash
-docker compose up --build api bot
+docker compose up --build api bot browser
 ```
 
 Telegram commands:
 
 - `/start` — help
+- `/login` — show VPS browser instructions
 - `/set_token <OZON_ORD_COOKIE>` — save cookie
 - `/upload` — run statistics upload
 
 `/set-token` is not used because Telegram commands support underscores, not dashes.
+
+## Get ORD cookie from VPS browser
+
+Ozon can reject cookies copied from your local browser because the bot uploads from the VPS IP.
+Use the bundled Chromium container to log in from the same VPS IP.
+
+1. Start the browser service:
+
+```bash
+docker compose up -d browser
+```
+
+2. Open an SSH tunnel from your laptop:
+
+```bash
+ssh -L 3000:127.0.0.1:3000 root@<VPS_IP>
+```
+
+3. Open locally:
+
+```text
+http://127.0.0.1:3000
+```
+
+4. In that browser, log in to `https://ord.ozon.ru` and pass challenge.
+5. Copy `OZON_ORD_COOKIE` from that VPS browser and send it to bot:
+
+```text
+/set_token __Secure-...; sid=...
+```
 
 ## Run on a VPS
 
@@ -81,13 +112,13 @@ OZON_ORD_API_KEY=your_external_api_key
 5. Start services in background:
 
 ```bash
-docker compose up -d --build api bot
+docker compose up -d --build api bot browser
 ```
 
 6. Check logs:
 
 ```bash
-docker compose logs -f api bot
+docker compose logs -f api bot browser
 ```
 
 Useful commands:
@@ -96,11 +127,14 @@ Useful commands:
 docker compose ps
 docker compose restart bot
 docker compose restart api
+docker compose restart browser
 docker compose up -d --build
 ```
 
 Notes:
 - bot works only while `bot` container is running
+- VPS browser is available only through SSH tunnel on `127.0.0.1:3000`
+- browser profile is persisted in `./.runtime/browser-config`
 - saved cookie is persisted in `./.runtime/ozon-cookie.json`
 - if you do not need public API access on the VPS, bind port `8765` to localhost only
 
@@ -126,7 +160,7 @@ git checkout main
 git reset --hard origin/main
 # deploy script uses docker compose if available, otherwise docker-compose
 $COMPOSE rm -sf api bot || true
-$COMPOSE up -d --build --remove-orphans api bot
+$COMPOSE up -d --build --remove-orphans api bot browser
 docker image prune -f
 ```
 
@@ -152,10 +186,10 @@ Check it manually on the VPS:
 cd /home/deploy/ozon-ord
 git fetch origin
 # new Compose plugin:
-docker compose up -d --build api bot
+docker compose up -d --build api bot browser
 
 # old Compose binary:
-docker-compose up -d --build api bot
+docker-compose up -d --build api bot browser
 ```
 
 If the repo is private, configure SSH deploy key or another git auth method on the VPS first.
