@@ -256,7 +256,6 @@ def validate_rows(rows: list[ParsedRow]) -> list[RowIssue]:
         "month": "month",
         "creative_id": "creative_id",
         "channel_url": "channel_url",
-        "contractor": "contractor",
         "price_with_tax": "price_with_tax",
         "publication_date": "publication_date",
         "reach": "reach",
@@ -268,17 +267,6 @@ def validate_rows(rows: list[ParsedRow]) -> list[RowIssue]:
         for attr_name, label in required_fields.items():
             if getattr(row, attr_name) is None:
                 messages.append(f"missing {label}")
-
-        suspicious_columns = [
-            key
-            for key, value in row.raw.items()
-            if key.startswith("column_") and text_or_none(value) is not None
-        ]
-        if suspicious_columns:
-            messages.append(
-                "unexpected values in unnamed columns: "
-                + ", ".join(suspicious_columns[:5])
-            )
 
         if messages:
             issues.append(RowIssue(row_number=row.row_number, messages=messages))
