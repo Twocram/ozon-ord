@@ -124,6 +124,10 @@ class AdminOzonOrdClient:
 
     def add_statistics(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
         raw, status, url = self._post_statistics({"statistics": payloads})
+        if 300 <= status < 400:
+            raise OzonOrdApiError(
+                "ORD redirected to login; cookie is invalid or expired"
+            )
         if status >= 400:
             raise OzonOrdApiError(f"POST {url} failed with HTTP {status}: {raw}")
         return json.loads(raw) if raw else {}
@@ -134,11 +138,12 @@ class AdminOzonOrdClient:
         except OzonOrdApiError as error:
             return CookieValidationResult(is_valid=None, status_code=None, error=str(error))
 
-        if status in {401, 403}:
+        if status in {301, 302, 303, 307, 308, 401, 403}:
             return CookieValidationResult(
                 is_valid=False,
                 status_code=status,
-                error=_response_error_text(raw) or f"HTTP {status}",
+                error=_response_error_text(raw)
+                or "ORD redirected to login; cookie is invalid or expired",
             )
 
         if 200 <= status < 300 or status in {400, 405, 422}:
@@ -158,7 +163,6 @@ class AdminOzonOrdClient:
                 "curl",
                 "--silent",
                 "--show-error",
-                "--location",
                 "--max-time",
                 str(self.timeout),
                 "--write-out",

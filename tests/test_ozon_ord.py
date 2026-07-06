@@ -38,6 +38,31 @@ class ValidateCookieTest(unittest.TestCase):
         self.assertEqual(result.status_code, 401)
         self.assertEqual(result.error, "unauthorized")
 
+    def test_treats_redirect_as_invalid_cookie(self) -> None:
+        client = AdminOzonOrdClient("cookie")
+
+        with patch(
+            "ozon_ord_sync.infrastructure.ozon_ord.subprocess.run",
+            return_value=CompletedProcess(args=[], returncode=0, stdout="\n302", stderr=""),
+        ):
+            result = client.validate_cookie()
+
+        self.assertFalse(result.is_valid)
+        self.assertEqual(result.status_code, 302)
+        self.assertIn("cookie is invalid", result.error or "")
+
+    def test_curl_does_not_follow_redirects(self) -> None:
+        client = AdminOzonOrdClient("cookie")
+
+        with patch(
+            "ozon_ord_sync.infrastructure.ozon_ord.subprocess.run",
+            return_value=CompletedProcess(args=[], returncode=0, stdout="{}\n200", stderr=""),
+        ) as run:
+            client.validate_cookie()
+
+        command = run.call_args.args[0]
+        self.assertNotIn("--location", command)
+
 
 if __name__ == "__main__":
     unittest.main()

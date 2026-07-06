@@ -133,8 +133,23 @@ def run_telegram_bot() -> None:
             )
             return
 
+        validation = await asyncio.to_thread(
+            _post_api,
+            config,
+            "/api/auth/validate",
+            {},
+        )
+        if validation.status >= 400 or validation.payload.get("cookieValid") is not True:
+            await message.reply_text(
+                truncate_message(
+                    "⚠️ Cookie сохранён, но проверка не прошла.\n"
+                    + extract_error_message(validation.payload, validation.status)
+                )
+            )
+            return
+
         await message.reply_text(
-            f"✅ Cookie сохранён. Найдено записей: {result.payload.get('cookieEntries', 0)}"
+            f"✅ Cookie сохранён и проверен. Найдено записей: {result.payload.get('cookieEntries', 0)}"
         )
 
     application.add_handler(CommandHandler("start", start_command))
@@ -194,9 +209,10 @@ def format_upload_result(payload: dict[str, Any], status: int) -> str:
 
 
 def extract_error_message(payload: dict[str, Any], status: int) -> str:
-    error = payload.get("error")
-    if isinstance(error, str) and error:
-        return _translate_error_text(error)
+    for key in ("error", "validationError"):
+        error = payload.get(key)
+        if isinstance(error, str) and error:
+            return _translate_error_text(error)
     return f"HTTP {status}"
 
 
@@ -240,6 +256,8 @@ def _translate_error_text(text: str) -> str:
         "missing publication_date": "отсутствует publication_date",
         "missing reach": "отсутствует reach",
         "cookie is not set": "Cookie не установлен.",
+        "ORD redirected to login; cookie is invalid or expired": "ORD перенаправил на логин — cookie неверный или истёк.",
+        "Maximum redirects followed": "Слишком много редиректов — cookie неверный или истёк.",
         "unauthorized": "Нет доступа.",
     }
     for source, target in replacements.items():
