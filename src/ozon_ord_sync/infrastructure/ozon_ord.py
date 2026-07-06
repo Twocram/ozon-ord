@@ -129,7 +129,8 @@ class AdminOzonOrdClient:
                 "ORD redirected to login; cookie is invalid or expired"
             )
         if status >= 400:
-            raise OzonOrdApiError(f"POST {url} failed with HTTP {status}: {raw}")
+            message = _response_error_text(raw) or raw
+            raise OzonOrdApiError(f"POST {url} failed with HTTP {status}: {message}")
         if not raw:
             return {}
         try:
@@ -267,6 +268,9 @@ def _response_error_text(raw: str) -> str | None:
     except json.JSONDecodeError:
         return text
     if isinstance(payload, dict):
+        challenge_url = payload.get("challengeURL")
+        if isinstance(challenge_url, str) and challenge_url:
+            return "Ozon anti-bot challenge required"
         for key in ("error", "message", "detail", "description"):
             value = payload.get(key)
             if isinstance(value, str) and value:

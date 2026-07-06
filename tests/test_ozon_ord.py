@@ -38,6 +38,24 @@ class ValidateCookieTest(unittest.TestCase):
         self.assertEqual(result.status_code, 401)
         self.assertEqual(result.error, "unauthorized")
 
+    def test_treats_challenge_as_invalid_cookie(self) -> None:
+        client = AdminOzonOrdClient("cookie")
+
+        with patch(
+            "ozon_ord_sync.infrastructure.ozon_ord.subprocess.run",
+            return_value=CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout='{"challengeURL":"https://ord.ozon.ru/challenge.html"}\n403',
+                stderr="",
+            ),
+        ):
+            result = client.validate_cookie()
+
+        self.assertFalse(result.is_valid)
+        self.assertEqual(result.status_code, 403)
+        self.assertEqual(result.error, "Ozon anti-bot challenge required")
+
     def test_treats_redirect_as_invalid_cookie(self) -> None:
         client = AdminOzonOrdClient("cookie")
 

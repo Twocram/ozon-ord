@@ -258,6 +258,7 @@ def _translate_error_text(text: str) -> str:
         "cookie is not set": "Cookie не установлен.",
         "ORD redirected to login; cookie is invalid or expired": "ORD перенаправил на логин — cookie неверный или истёк.",
         "ORD returned non-JSON; cookie is invalid or expired": "ORD вернул страницу логина — cookie неверный или истёк.",
+        "Ozon anti-bot challenge required": "Ozon запросил anti-bot challenge. Откройте ORD в браузере, пройдите проверку и попробуйте снова.",
         "Maximum redirects followed": "Слишком много редиректов — cookie неверный или истёк.",
         "unauthorized": "Нет доступа.",
     }
