@@ -49,9 +49,12 @@ class ValidateCookieTest(unittest.TestCase):
 
         self.assertFalse(result.is_valid)
         self.assertEqual(result.status_code, 302)
-        self.assertIn("cookie is invalid", result.error or "")
+        self.assertEqual(
+            result.error,
+            "ORD redirected to login; cookie is invalid or expired",
+        )
 
-    def test_curl_does_not_follow_redirects(self) -> None:
+    def test_curl_uses_cookie_jar_for_redirect_cookie(self) -> None:
         client = AdminOzonOrdClient("cookie")
 
         with patch(
@@ -61,7 +64,22 @@ class ValidateCookieTest(unittest.TestCase):
             client.validate_cookie()
 
         command = run.call_args.args[0]
-        self.assertNotIn("--location", command)
+        self.assertIn("--location", command)
+        self.assertIn("--cookie-jar", command)
+        self.assertNotIn("cookie: cookie", command)
+
+    def test_treats_200_html_as_invalid_cookie(self) -> None:
+        client = AdminOzonOrdClient("cookie")
+
+        with patch(
+            "ozon_ord_sync.infrastructure.ozon_ord.subprocess.run",
+            return_value=CompletedProcess(args=[], returncode=0, stdout="<html></html>\n200", stderr=""),
+        ):
+            result = client.validate_cookie()
+
+        self.assertFalse(result.is_valid)
+        self.assertEqual(result.status_code, 200)
+        self.assertIn("non-JSON", result.error or "")
 
 
 if __name__ == "__main__":

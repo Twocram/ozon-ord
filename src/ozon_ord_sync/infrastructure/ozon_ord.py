@@ -130,7 +130,15 @@ class AdminOzonOrdClient:
             )
         if status >= 400:
             raise OzonOrdApiError(f"POST {url} failed with HTTP {status}: {raw}")
-        return json.loads(raw) if raw else {}
+        if not raw:
+            return {}
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise OzonOrdApiError(
+                "ORD returned non-JSON; cookie is invalid or expired"
+            ) from error
+        return loaded if isinstance(loaded, dict) else {}
 
     def validate_cookie(self) -> CookieValidationResult:
         try:
@@ -138,15 +146,30 @@ class AdminOzonOrdClient:
         except OzonOrdApiError as error:
             return CookieValidationResult(is_valid=None, status_code=None, error=str(error))
 
-        if status in {301, 302, 303, 307, 308, 401, 403}:
+        if status in {301, 302, 303, 307, 308}:
             return CookieValidationResult(
                 is_valid=False,
                 status_code=status,
-                error=_response_error_text(raw)
-                or "ORD redirected to login; cookie is invalid or expired",
+                error="ORD redirected to login; cookie is invalid or expired",
             )
 
-        if 200 <= status < 300 or status in {400, 405, 422}:
+        if status in {401, 403}:
+            return CookieValidationResult(
+                is_valid=False,
+                status_code=status,
+                error=_response_error_text(raw) or f"HTTP {status}",
+            )
+
+        if 200 <= status < 300:
+            if raw and not _is_json_response(raw):
+                return CookieValidationResult(
+                    is_valid=False,
+                    status_code=status,
+                    error="ORD returned non-JSON; cookie is invalid or expired",
+                )
+            return CookieValidationResult(is_valid=True, status_code=status)
+
+        if status in {400, 405, 422}:
             return CookieValidationResult(is_valid=True, status_code=status)
 
         return CookieValidationResult(
@@ -163,8 +186,15 @@ class AdminOzonOrdClient:
                 "curl",
                 "--silent",
                 "--show-error",
+                "--location",
+                "--max-redirs",
+                "5",
                 "--max-time",
                 str(self.timeout),
+                "--cookie",
+                self.cookie_header,
+                "--cookie-jar",
+                "/dev/null",
                 "--write-out",
                 "\n%{http_code}",
                 url,
@@ -178,8 +208,6 @@ class AdminOzonOrdClient:
                 "cache-control: no-cache",
                 "-H",
                 "content-type: application/json",
-                "-H",
-                f"cookie: {self.cookie_header}",
                 "-H",
                 f"origin: {self.base_url}",
                 "-H",
@@ -220,6 +248,14 @@ class AdminOzonOrdClient:
         if not status.isdigit():
             raise OzonOrdApiError(f"POST {url} failed: missing HTTP status")
         return raw, int(status), url
+
+
+def _is_json_response(raw: str) -> bool:
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    return True
 
 
 def _response_error_text(raw: str) -> str | None:
