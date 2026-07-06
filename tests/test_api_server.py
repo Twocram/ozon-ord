@@ -10,8 +10,18 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ozon_ord_sync.application.sync_workflows import run_statistics_preview
-from ozon_ord_sync.domain.models import OzonOrdStatisticPayload, ParsedRow, RowIssue, SyncBatch
+from ozon_ord_sync.application.sync_workflows import (
+    run_extension_statistics_prepare,
+    run_statistics_preview,
+)
+from ozon_ord_sync.domain.models import (
+    OzonOrdAdminStatisticPayload,
+    OzonOrdStatisticPayload,
+    ParsedRow,
+    ResolvedStatisticPayload,
+    RowIssue,
+    SyncBatch,
+)
 from ozon_ord_sync.infrastructure.api_server import MAX_REQUEST_BODY_BYTES, _ApiHandler
 from ozon_ord_sync.infrastructure.ozon_ord import CookieValidationResult
 
@@ -92,6 +102,68 @@ class AuthValidateHandlerTest(unittest.TestCase):
         self.assertEqual(payloads[0][1], 200)
         self.assertEqual(payloads[0][0]["cookieValid"], True)
         self.assertEqual(payloads[0][0]["validationStatusCode"], 400)
+
+
+class ExtensionStatisticsPrepareWorkflowTest(unittest.TestCase):
+    def test_prepare_returns_admin_payloads_for_extension(self) -> None:
+        row = ParsedRow(
+            row_number=2,
+            manager="m",
+            month=date(2026, 7, 1),
+            platform="p",
+            creative_id="creative",
+            channel_url="https://t.me/test",
+            executor="100б",
+            contractor="c",
+            price_with_tax=Decimal("100"),
+            publication_date=date(2026, 7, 2),
+            display_date=date(2026, 7, 3),
+            reach=10,
+            mark=None,
+            error=None,
+            raw={},
+        )
+        batch = SyncBatch(platforms=[], statistics=[], mapping_errors=[])
+        admin_payload = OzonOrdAdminStatisticPayload(
+            creativeId="creative-id",
+            platformId="platform-id",
+            price={"amount": "100", "vatRate": "", "withNdsSelected": False},
+            comment="",
+            dateEndFact=date(2026, 7, 3),
+            dateEndPlan=date(2026, 7, 3),
+            paymentType="PAYMENT_TYPE_OTHER",
+            dateStartFact=date(2026, 7, 2),
+            dateStartPlan=date(2026, 7, 2),
+            unitCost="100",
+            viewsCountByFact="10",
+            viewsCountByInvoice="10",
+            sameDate=True,
+            sameViews=True,
+            isAutoCalc=True,
+            isSelfPromo=False,
+            isNative=False,
+            externalId="",
+            fromDate="",
+            toDate="",
+        )
+
+        with (
+            patch("ozon_ord_sync.application.sync_workflows.parse_sheet", return_value=([], [row])),
+            patch("ozon_ord_sync.application.sync_workflows.filter_rows_for_processing", return_value=[row]),
+            patch("ozon_ord_sync.application.sync_workflows.build_sync_batch", return_value=batch),
+            patch("ozon_ord_sync.application.sync_workflows.build_external_ozon_ord_client_from_env", return_value=object()),
+            patch(
+                "ozon_ord_sync.application.sync_workflows.resolve_admin_statistics",
+                return_value=([ResolvedStatisticPayload(2, admin_payload)], []),
+            ),
+        ):
+            result = run_extension_statistics_prepare("sheet")
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.rows_eligible, 1)
+        self.assertEqual(result.statistics_prepared, 1)
+        self.assertEqual(result.statistics[0]["creativeId"], "creative-id")
+        self.assertEqual(result.to_dict()["rowsEligible"], 1)
 
 
 class StatisticsPreviewWorkflowTest(unittest.TestCase):

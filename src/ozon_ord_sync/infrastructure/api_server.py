@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ozon_ord_sync.application.sync_workflows import (
+    run_extension_statistics_prepare,
     run_platform_preview,
     run_platform_sync,
     run_statistics_preview,
@@ -84,6 +85,9 @@ class _ApiHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/auth/validate":
                 self._handle_auth_validate()
+                return
+            if path == "/api/extension/statistics/prepare":
+                self._handle_extension_statistics_prepare(payload)
                 return
             if path == "/api/preview/statistics":
                 self._handle_statistics_preview(payload)
@@ -194,6 +198,13 @@ class _ApiHandler(BaseHTTPRequestHandler):
                 "validationError": validation.error,
             },
             status=status,
+        )
+
+    def _handle_extension_statistics_prepare(self, payload: dict[str, Any]) -> None:
+        result = run_extension_statistics_prepare(self._sheet_url(payload))
+        self._send_json(
+            result.to_dict(),
+            status=HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST,
         )
 
     def _handle_statistics_preview(self, payload: dict[str, Any]) -> None:

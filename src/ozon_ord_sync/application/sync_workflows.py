@@ -83,6 +83,26 @@ class StatisticsPreviewResult:
 
 
 @dataclass
+class ExtensionStatisticsPrepareResult:
+    ok: bool
+    rows_eligible: int
+    statistics_prepared: int
+    statistics: list[dict[str, Any]]
+    mapping_errors: list[str]
+    resolution_errors: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "rowsEligible": self.rows_eligible,
+            "statisticsPrepared": self.statistics_prepared,
+            "statistics": self.statistics,
+            "mappingErrors": self.mapping_errors,
+            "resolutionErrors": self.resolution_errors,
+        }
+
+
+@dataclass
 class StatisticsSyncResult:
     ok: bool
     rows_eligible: int
@@ -169,6 +189,39 @@ def run_statistics_preview(
         sample_rows=_sample_rows(filtered_rows, limit),
         sample_statistics=_sample_rows(batch.statistics, limit),
     )
+
+
+def run_extension_statistics_prepare(
+    sheet_url: str,
+) -> ExtensionStatisticsPrepareResult:
+    _, rows = parse_sheet(sheet_url)
+    filtered_rows = filter_rows_for_processing(rows)
+    batch = build_sync_batch(filtered_rows)
+
+    result = ExtensionStatisticsPrepareResult(
+        ok=not batch.mapping_errors,
+        rows_eligible=len(filtered_rows),
+        statistics_prepared=len(batch.statistics),
+        statistics=[],
+        mapping_errors=batch.mapping_errors,
+        resolution_errors=[],
+    )
+    if batch.mapping_errors:
+        return result
+
+    external_client = build_external_ozon_ord_client_from_env()
+    resolved_statistics, resolution_errors = resolve_admin_statistics(
+        external_client, batch
+    )
+    result.resolution_errors = resolution_errors
+    if resolution_errors:
+        result.ok = False
+        save_platform_errors(filtered_rows, resolution_errors)
+        return result
+
+    result.statistics = [asdict(item.payload) for item in resolved_statistics]
+    result.statistics_prepared = len(result.statistics)
+    return result
 
 
 def run_statistics_sync(sheet_url: str, send: bool) -> StatisticsSyncResult:

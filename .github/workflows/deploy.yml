@@ -44,5 +44,5 @@ jobs:
             # docker-compose v1 can fail on recreate with KeyError: ContainerConfig.
             # Removing old service containers first avoids that broken recreate path.
             $COMPOSE rm -sf api bot || true
-            $COMPOSE up -d --build --remove-orphans api bot browser
+            $COMPOSE up -d --build --remove-orphans api bot
             docker image prune -f

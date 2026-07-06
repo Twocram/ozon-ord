@@ -13,12 +13,10 @@ from typing import Any
 START_TEXT = (
     "👋 Добро пожаловать в бот Ozon ORD Sync.\n\n"
     "Как пользоваться:\n"
-    "1. Выполните /login и войдите в ORD через браузер на VPS\n"
-    "2. Скопируйте cookie из этого браузера\n"
-    "3. Выполните /set_token <OZON_ORD_COOKIE>\n"
-    "4. Выполните /upload для отправки статистики\n\n"
+    "1. Выполните /set_token <OZON_ORD_COOKIE>\n"
+    "2. Дождитесь сообщения об успешном сохранении\n"
+    "3. Выполните /upload для отправки статистики\n\n"
     "Команды:\n"
-    "🌐 /login — открыть браузер на VPS\n"
     "🔑 /set_token <OZON_ORD_COOKIE> — сохранить cookie\n"
     "🚀 /upload — отправить статистику"
 )
@@ -27,15 +25,6 @@ SET_TOKEN_TEXT = (
     "Пример: /set_token <OZON_ORD_COOKIE>"
 )
 EMPTY_COOKIE_TEXT = "⚠️ Пустой token. Передайте значение OZON_ORD_COOKIE в команде."
-LOGIN_TEXT = (
-    "🌐 Браузер на VPS нужен, чтобы ORD видел тот же IP, что и бот.\n\n"
-    "Откройте локально через SSH-туннель:\n"
-    "ssh -L 3000:127.0.0.1:3000 root@<VPS_IP>\n\n"
-    "Потом в браузере откройте:\n"
-    "http://127.0.0.1:3000\n\n"
-    "Войдите в https://ord.ozon.ru, пройдите challenge, скопируйте cookie "
-    "из этого браузера и отправьте /set_token <cookie>."
-)
 API_BASE_URL = "http://api:8765"
 OZON_BASE_URL = "https://ord.ozon.ru"
 
@@ -81,7 +70,6 @@ def run_telegram_bot() -> None:
         await application.bot.set_my_commands(
             [
                 BotCommand("start", "Помощь"),
-                BotCommand("login", "Браузер VPS"),
                 BotCommand("set_token", "Сохранить cookie"),
                 BotCommand("upload", "Загрузить статистику"),
             ]
@@ -93,13 +81,6 @@ def run_telegram_bot() -> None:
         message = update.effective_message
         if message is not None:
             await message.reply_text(START_TEXT)
-
-    async def login_command(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        message = update.effective_message
-        if message is not None:
-            await message.reply_text(LOGIN_TEXT)
 
     async def upload_command(
         update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -172,7 +153,6 @@ def run_telegram_bot() -> None:
         )
 
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("login", login_command))
     application.add_handler(CommandHandler("upload", upload_command))
     application.add_handler(CommandHandler("set_token", set_token_command))
 
