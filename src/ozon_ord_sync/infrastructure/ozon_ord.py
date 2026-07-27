@@ -141,11 +141,155 @@ class AdminOzonOrdClient:
             ) from error
         return loaded if isinstance(loaded, dict) else {}
 
+    def list_contracts(self, query: dict[str, Any]) -> dict[str, Any]:
+        return self._admin_request_json(
+            "GET",
+            f"/api/ord/admin/v6/contract/list?{admin_query(query)}",
+            referer="/contracts",
+        )
+
+    def list_admin_creatives(self, query: dict[str, Any]) -> dict[str, Any]:
+        return self._admin_request_json(
+            "GET",
+            f"/api/ord/admin/v4/creative/list?{admin_query(query)}",
+            referer="/creatives",
+        )
+
+    def list_organisations(self, query: dict[str, Any]) -> dict[str, Any]:
+        return self._admin_request_json(
+            "GET",
+            f"/api/ord/admin/v6/organisation/list?{admin_query(query)}",
+            referer="/ad-providers",
+        )
+
+    def create_organisation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # Endpoint and referer mirror the browser "Добавление контрагента" request.
+        return self._admin_request_json(
+            "POST",
+            "/api/ord/admin/v6/organisation",
+            payload=payload,
+            referer="/ad-providers/new",
+        )
+
+    def create_contract(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # Endpoint and referer mirror the browser "Добавление договора" request.
+        return self._admin_request_json(
+            "POST",
+            "/api/ord/admin/v6/contract",
+            payload=payload,
+            referer="/contracts/new",
+        )
+
+    def create_creative(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # Endpoint and referer mirror the browser "Добавление креатива" request.
+        return self._admin_request_json(
+            "POST",
+            "/api/ord/admin/v4/creative",
+            payload=payload,
+            referer="/creatives/new",
+        )
+
+    def upload_media(
+        self,
+        file_path: str,
+        filename: str,
+        content_type: str | None = None,
+    ) -> dict[str, Any]:
+        # Mirrors the browser multipart upload to /api/ord/v2/file/media. The response
+        # carries the stored file id/size that the creative payload references.
+        form_value = f"file=@{file_path}"
+        if content_type:
+            form_value += f";type={content_type}"
+        if filename:
+            form_value += f";filename={filename}"
+
+        url = f"{self.base_url}/api/ord/v2/file/media"
+        command = [
+            "curl",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-redirs",
+            "5",
+            "--max-time",
+            str(self.timeout),
+            "--cookie",
+            self.cookie_header,
+            "--cookie-jar",
+            "/dev/null",
+            "--write-out",
+            "\n%{http_code}",
+            url,
+            "-X",
+            "POST",
+            "-H",
+            "accept: application/json, text/plain, */*",
+            "-H",
+            "accept-language: ru",
+            "-H",
+            f"origin: {self.base_url}",
+            "-H",
+            f"referer: {self.base_url}/creatives/new",
+            "-H",
+            "user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+            "-H",
+            f"x-o3-app-name: {self.app_name}",
+            "-H",
+            f"x-o3-app-version: {self.app_version}",
+            "-F",
+            form_value,
+        ]
+
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            raise OzonOrdApiError(result.stderr.strip() or "curl failed")
+
+        raw, _, status = result.stdout.rpartition("\n")
+        if not status.isdigit():
+            raise OzonOrdApiError("media upload failed: missing HTTP status")
+        status_code = int(status)
+        if 300 <= status_code < 400:
+            raise OzonOrdApiError(
+                "ORD redirected to login; cookie is invalid or expired"
+            )
+        if status_code >= 400:
+            message = _response_error_text(raw) or raw
+            raise OzonOrdApiError(
+                f"media upload failed with HTTP {status_code}: {message}"
+            )
+        if not raw:
+            return {}
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise OzonOrdApiError("media upload returned non-JSON") from error
+        return loaded if isinstance(loaded, dict) else {}
+
+    def check_invoice_duplicates(self, payload: dict[str, Any]) -> dict[str, Any]:
+        query = invoice_duplicate_query(payload)
+        return self._admin_request_json(
+            "GET",
+            f"/api/ord/admin/v5/invoice/duplicates?{query}",
+            referer="/invoices/new?type=INVOICE_TYPE_INVOICE",
+        )
+
+    def create_extended_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._admin_request_json(
+            "POST",
+            "/api/ord/admin/v7/extended_invoice",
+            payload=payload,
+            referer="/invoices/new?type=INVOICE_TYPE_INVOICE",
+        )
+
     def validate_cookie(self) -> CookieValidationResult:
         try:
             raw, status, _ = self._post_statistics({"statistics": []})
         except OzonOrdApiError as error:
-            return CookieValidationResult(is_valid=None, status_code=None, error=str(error))
+            return CookieValidationResult(
+                is_valid=None,
+                status_code=None,
+                error=str(error),
+            )
 
         if status in {301, 302, 303, 307, 308}:
             return CookieValidationResult(
@@ -179,65 +323,100 @@ class AdminOzonOrdClient:
             error=_response_error_text(raw) or f"HTTP {status}",
         )
 
+    def _admin_request_json(
+        self,
+        method: str,
+        endpoint: str,
+        payload: dict[str, Any] | None = None,
+        referer: str = "/",
+    ) -> dict[str, Any]:
+        raw, status, url = self._curl_admin(method, endpoint, payload, referer)
+        if 300 <= status < 400:
+            raise OzonOrdApiError(
+                "ORD redirected to login; cookie is invalid or expired"
+            )
+        if status >= 400:
+            message = _response_error_text(raw) or raw
+            raise OzonOrdApiError(
+                f"{method} {url} failed with HTTP {status}: {message}"
+            )
+        if not raw:
+            return {}
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise OzonOrdApiError(
+                "ORD returned non-JSON; cookie is invalid or expired"
+            ) from error
+        return loaded if isinstance(loaded, dict) else {"items": loaded}
+
     def _post_statistics(self, body: dict[str, Any]) -> tuple[str, int, str]:
         # ponytail: ORD rejects urllib here; curl matches the browser request without adding deps.
-        url = f"{self.base_url}/api/ord/admin/v6/statistic?__rr=1"
+        return self._curl_admin(
+            "POST",
+            "/api/ord/admin/v6/statistic?__rr=1",
+            body,
+            "/statistics/new",
+        )
+
+    def _curl_admin(
+        self,
+        method: str,
+        endpoint: str,
+        payload: dict[str, Any] | None,
+        referer: str,
+    ) -> tuple[str, int, str]:
+        url = f"{self.base_url}{endpoint}"
+        command = [
+            "curl",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-redirs",
+            "5",
+            "--max-time",
+            str(self.timeout),
+            "--cookie",
+            self.cookie_header,
+            "--cookie-jar",
+            "/dev/null",
+            "--write-out",
+            "\n%{http_code}",
+            url,
+            "-X",
+            method,
+            "-H",
+            "accept: application/json, text/plain, */*",
+            "-H",
+            "accept-language: ru",
+            "-H",
+            "cache-control: no-cache",
+            "-H",
+            "content-type: application/json",
+            "-H",
+            f"origin: {self.base_url}",
+            "-H",
+            "pragma: no-cache",
+            "-H",
+            f"referer: {self.base_url}{referer}",
+            "-H",
+            "sec-fetch-dest: empty",
+            "-H",
+            "sec-fetch-mode: cors",
+            "-H",
+            "sec-fetch-site: same-origin",
+            "-H",
+            "user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+            "-H",
+            f"x-o3-app-name: {self.app_name}",
+            "-H",
+            f"x-o3-app-version: {self.app_version}",
+        ]
+        if payload is not None:
+            command += ["--data-raw", json.dumps(payload, default=str)]
+
         result = subprocess.run(
-            [
-                "curl",
-                "--silent",
-                "--show-error",
-                "--location",
-                "--max-redirs",
-                "5",
-                "--max-time",
-                str(self.timeout),
-                "--cookie",
-                self.cookie_header,
-                "--cookie-jar",
-                "/dev/null",
-                "--write-out",
-                "\n%{http_code}",
-                url,
-                "-X",
-                "POST",
-                "-H",
-                "accept: application/json, text/plain, */*",
-                "-H",
-                "accept-language: en-US,en;q=0.6",
-                "-H",
-                "cache-control: no-cache",
-                "-H",
-                "content-type: application/json",
-                "-H",
-                f"origin: {self.base_url}",
-                "-H",
-                "pragma: no-cache",
-                "-H",
-                f"referer: {self.base_url}/statistics/new",
-                "-H",
-                'sec-ch-ua: "Brave";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
-                "-H",
-                "sec-ch-ua-mobile: ?0",
-                "-H",
-                'sec-ch-ua-platform: "macOS"',
-                "-H",
-                "sec-fetch-dest: empty",
-                "-H",
-                "sec-fetch-mode: cors",
-                "-H",
-                "sec-fetch-site: same-origin",
-                "-H",
-                "sec-gpc: 1",
-                "-H",
-                "user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-                "-H",
-                f"x-o3-app-name: {self.app_name}",
-                "-H",
-                f"x-o3-app-version: {self.app_version}",
-                "--data-raw",
-                json.dumps(body, default=str),
-            ],
+            command,
             capture_output=True,
             text=True,
             check=False,
@@ -247,8 +426,48 @@ class AdminOzonOrdClient:
 
         raw, _, status = result.stdout.rpartition("\n")
         if not status.isdigit():
-            raise OzonOrdApiError(f"POST {url} failed: missing HTTP status")
+            raise OzonOrdApiError(f"{method} {url} failed: missing HTTP status")
         return raw, int(status), url
+
+
+def admin_query(query: dict[str, Any]) -> str:
+    return urllib.parse.urlencode(
+        [
+            (key, _query_value(item))
+            for key, value in query.items()
+            if value is not None
+            for item in (value if isinstance(value, list) else [value])
+        ]
+    )
+
+
+def invoice_duplicate_query(payload: dict[str, Any]) -> str:
+    service_price = payload.get("servicePrice") or {}
+    fields = [
+        ("key.invoiceNumber", payload.get("invoiceNumber")),
+        ("key.invoiceDate", payload.get("invoiceDate")),
+        ("key.startDate", payload.get("startDate")),
+        ("key.endDate", payload.get("endDate")),
+        ("key.clientRole", payload.get("clientRole")),
+        ("key.contractId", payload.get("contractId")),
+        ("key.contractorRole", payload.get("contractorRole")),
+        ("key.servicePrice.amount", service_price.get("amount")),
+        ("key.servicePrice.vatRate", service_price.get("vatRate")),
+        ("key.servicePrice.excludingAmount", service_price.get("excludingAmount")),
+        (
+            "key.servicePrice.withNdsSelected",
+            service_price.get("withNdsSelected"),
+        ),
+    ]
+    return urllib.parse.urlencode(
+        [(key, _query_value(value)) for key, value in fields if value is not None]
+    )
+
+
+def _query_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
 
 
 def _is_json_response(raw: str) -> bool:

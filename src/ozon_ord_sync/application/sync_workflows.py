@@ -5,6 +5,8 @@ from typing import Any
 
 from ozon_ord_sync.application.sheet_parser import (
     filter_rows_for_processing,
+    parse_creative_sheet,
+    parse_document_check_sheet,
     parse_platform_sheet,
     parse_sheet,
     validate_platform_rows,
@@ -66,6 +68,28 @@ class PlatformSyncResult:
 
 
 @dataclass
+class DocumentCheckPreviewResult:
+    ok: bool
+    rows_parsed: int
+    header: list[str]
+    sample_rows: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class CreativePreviewResult:
+    ok: bool
+    rows_parsed: int
+    header: list[str]
+    sample_rows: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class StatisticsPreviewResult:
     ok: bool
     rows_parsed: int
@@ -114,6 +138,32 @@ class StatisticsSyncResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def run_document_check_preview(
+    sheet_url: str,
+    limit: int = 3,
+) -> DocumentCheckPreviewResult:
+    header, rows = parse_document_check_sheet(sheet_url)
+    return DocumentCheckPreviewResult(
+        ok=True,
+        rows_parsed=len(rows),
+        header=header,
+        sample_rows=_sample_rows(rows, limit),
+    )
+
+
+def run_creative_preview(
+    sheet_url: str,
+    limit: int = 3,
+) -> CreativePreviewResult:
+    header, rows = parse_creative_sheet(sheet_url)
+    return CreativePreviewResult(
+        ok=True,
+        rows_parsed=len(rows),
+        header=header,
+        sample_rows=_sample_rows(rows, limit),
+    )
 
 
 def run_platform_preview(

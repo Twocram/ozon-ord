@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from calendar import monthrange
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlparse
@@ -55,6 +56,13 @@ def map_row_to_ozon_ord_payload(row: ParsedRow) -> OzonOrdPayload:
 
     display_start_date = publication_date
     display_end_date = row.display_date or publication_date + timedelta(days=1)
+    if display_end_date.replace(day=1) != display_start_date.replace(day=1):
+        # ponytail: June-only hotfix; split cross-month statistics if ORD needs both months later.
+        display_end_date = date(
+            display_start_date.year,
+            display_start_date.month,
+            monthrange(display_start_date.year, display_start_date.month)[1],
+        )
 
     return OzonOrdPayload(
         row_number=row.row_number,

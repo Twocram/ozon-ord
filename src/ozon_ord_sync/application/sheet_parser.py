@@ -10,8 +10,15 @@ from decimal import Decimal, InvalidOperation
 from itertools import islice
 from typing import Any, TypeVar
 
-from ozon_ord_sync.domain.models import ParsedPlatformRow, ParsedRow, RowIssue
+from ozon_ord_sync.domain.models import (
+    ParsedCreativeRow,
+    ParsedDocumentCheckRow,
+    ParsedPlatformRow,
+    ParsedRow,
+    RowIssue,
+)
 from ozon_ord_sync.infrastructure.google_sheets import (
+    DEFAULT_CREATIVE_SHEET_URL,
     DEFAULT_PLATFORM_SHEET_NAME,
     DEFAULT_SHEET_URL,
     fetch_sheet_rows,
@@ -19,7 +26,13 @@ from ozon_ord_sync.infrastructure.google_sheets import (
 
 TARGET_EXECUTOR = "100б"
 
-ParsedSheetRow = TypeVar("ParsedSheetRow", ParsedRow, ParsedPlatformRow)
+ParsedSheetRow = TypeVar(
+    "ParsedSheetRow",
+    ParsedRow,
+    ParsedPlatformRow,
+    ParsedDocumentCheckRow,
+    ParsedCreativeRow,
+)
 
 
 def parse_sheet(
@@ -67,6 +80,66 @@ def parse_sheet(
     return normalized_header, parsed_rows
 
 
+def parse_document_check_sheet(
+    sheet_url: str,
+) -> tuple[list[str], list[ParsedDocumentCheckRow]]:
+    header, rows = fetch_sheet_rows(sheet_url)
+    normalized_header = [
+        "platform" if slugify(column) in {"ploschadka", "ploshchadka"} else name
+        for column, name in zip(header, normalize_header(header))
+    ]
+
+    parsed_rows: list[ParsedDocumentCheckRow] = []
+    for offset, row in enumerate(rows, start=2):
+        if is_effectively_empty(row):
+            continue
+
+        raw_row = build_raw_row(normalized_header, row)
+        parsed_rows.append(
+            ParsedDocumentCheckRow(
+                row_number=offset,
+                submitted_at=parse_datetime(raw_row.get("submitted_at")),
+                manager=text_or_none(raw_row.get("manager")),
+                payment_amount=parse_decimal(raw_row.get("payment_amount")),
+                expense_description=text_or_none(raw_row.get("expense_description")),
+                contract_url=text_or_none(raw_row.get("contract_url")),
+                invoice_url=text_or_none(raw_row.get("invoice_url")),
+                counterparty=text_or_none(raw_row.get("counterparty")),
+                signature_type=text_or_none(raw_row.get("signature_type")),
+                payment_status=text_or_none(raw_row.get("payment_status")),
+                receipts_acts_url=text_or_none(raw_row.get("receipts_acts_url")),
+                expense_month=text_or_none(raw_row.get("expense_month")),
+                platform=text_or_none(
+                    raw_row.get("platform") or raw_row.get("channel_url")
+                ),
+                comment=text_or_none(raw_row.get("comment")),
+                in_ord=parse_bool(raw_row.get("in_ord")),
+                addendum_url=text_or_none(raw_row.get("addendum_url")),
+                check=text_or_none(raw_row.get("check")),
+                raw=raw_row,
+            )
+        )
+
+    return normalized_header, parsed_rows
+
+
+def parse_creative_sheet(
+    sheet_url: str = DEFAULT_CREATIVE_SHEET_URL,
+) -> tuple[list[str], list[ParsedCreativeRow]]:
+    header, rows = fetch_sheet_rows(sheet_url)
+    normalized_header = normalize_header(header)
+
+    parsed_rows: list[ParsedCreativeRow] = []
+    for offset, row in enumerate(rows, start=2):
+        if is_effectively_empty(row):
+            continue
+
+        raw_row = build_raw_row(normalized_header, row)
+        parsed_rows.append(ParsedCreativeRow(row_number=offset, raw=raw_row))
+
+    return normalized_header, parsed_rows
+
+
 def parse_platform_sheet(
     sheet_url: str = DEFAULT_SHEET_URL,
     sheet_name: str = DEFAULT_PLATFORM_SHEET_NAME,
@@ -107,6 +180,7 @@ def parse_platform_sheet(
 
 def normalize_header(header: list[str]) -> list[str]:
     known_names = {
+        "data_zayavki": "submitted_at",
         "menedzher": "manager",
         "mesyats": "month",
         "sotsset": "platform",
@@ -115,6 +189,8 @@ def normalize_header(header: list[str]) -> list[str]:
         "ssylka_na_kanal": "channel_url",
         "ispolnitel": "executor",
         "k_a": "contractor",
+        "kontragent": "counterparty",
+        "summa_platezha": "payment_amount",
         "tsena": "price_with_tax",
         "tsena_s_nalogom": "price_with_tax",
         "data_vyhoda": "publication_date",
@@ -123,6 +199,18 @@ def normalize_header(header: list[str]) -> list[str]:
         "mark": "mark",
         "oshibka": "error",
         "oshibka_ploshchadki": "error",
+        "opisanie_rashoda": "expense_description",
+        "dogovor": "contract_url",
+        "schet": "invoice_url",
+        "kak_podpisano": "signature_type",
+        "status_opaty": "payment_status",
+        "status_oplaty": "payment_status",
+        "cheki_akty": "receipts_acts_url",
+        "mes_rashoda": "expense_month",
+        "kommentarii": "comment",
+        "v_ord": "in_ord",
+        "dop_soglashenie": "addendum_url",
+        "proverka": "check",
         "nazvanie_ploschadki": "platform_name",
         "nazvanie_ploshchadki": "platform_name",
         "url_ploschadki": "platform_url",
@@ -174,6 +262,23 @@ def parse_date(value: Any) -> date | None:
     return date.fromisoformat(text)
 
 
+def parse_datetime(value: Any) -> datetime | None:
+    text = text_or_none(value)
+    if text is None:
+        return None
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%d.%m.%Y %H:%M:%S",
+        "%d.%m.%Y %H:%M",
+    ):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            pass
+    return datetime.fromisoformat(text)
+
+
 def parse_decimal(value: Any) -> Decimal | None:
     text = text_or_none(value)
     if text is None:
@@ -195,6 +300,18 @@ def parse_int(value: Any) -> int | None:
     if not re.fullmatch(r"-?\d+", digits):
         return None
     return int(digits)
+
+
+def parse_bool(value: Any) -> bool | None:
+    text = text_or_none(value)
+    if text is None:
+        return None
+    normalized = text.casefold()
+    if normalized in {"true", "1", "yes", "да", "истина"}:
+        return True
+    if normalized in {"false", "0", "no", "нет", "ложь"}:
+        return False
+    return None
 
 
 def slugify(value: str) -> str:
@@ -245,8 +362,14 @@ def rows_to_json(rows: Iterable[ParsedSheetRow], limit: int = 3) -> str:
 def filter_rows_for_processing(
     rows: list[ParsedRow], target_executor: str = TARGET_EXECUTOR
 ) -> list[ParsedRow]:
-    target = _normalize_executor_value(target_executor)
-    return [row for row in rows if _normalize_executor_value(row.executor) == target]
+    # target = _normalize_executor_value(target_executor)
+    return [
+        row
+        for row in rows
+        # Temporarily process every executor. Restore when the 100б-only sheet is used again:
+        # if _normalize_executor_value(row.executor) == target
+        if (row.creative_id or "").strip().casefold() != "к/а"
+    ]
 
 
 def validate_rows(rows: list[ParsedRow]) -> list[RowIssue]:

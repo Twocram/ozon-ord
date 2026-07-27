@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -37,6 +37,34 @@ class ParsedPlatformRow:
 class RowIssue:
     row_number: int
     messages: list[str]
+
+
+@dataclass
+class ParsedDocumentCheckRow:
+    row_number: int
+    submitted_at: datetime | None
+    manager: str | None
+    payment_amount: Decimal | None
+    expense_description: str | None
+    contract_url: str | None
+    invoice_url: str | None
+    counterparty: str | None
+    signature_type: str | None
+    payment_status: str | None
+    receipts_acts_url: str | None
+    expense_month: str | None
+    platform: str | None
+    comment: str | None
+    in_ord: bool | None
+    addendum_url: str | None
+    check: str | None
+    raw: dict[str, Any]
+
+
+@dataclass
+class ParsedCreativeRow:
+    row_number: int
+    raw: dict[str, Any]
 
 
 @dataclass

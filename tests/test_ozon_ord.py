@@ -8,7 +8,43 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ozon_ord_sync.infrastructure.ozon_ord import AdminOzonOrdClient
+from ozon_ord_sync.infrastructure.ozon_ord import (
+    AdminOzonOrdClient,
+    admin_query,
+    invoice_duplicate_query,
+)
+
+
+class AdminQueryTest(unittest.TestCase):
+    def test_encodes_repeated_array_values(self) -> None:
+        query = admin_query({"contractId": ["1", "2"], "pageSize": 10})
+
+        self.assertEqual(query, "contractId=1&contractId=2&pageSize=10")
+
+
+class InvoiceDuplicateQueryTest(unittest.TestCase):
+    def test_builds_browser_duplicate_query(self) -> None:
+        query = invoice_duplicate_query(
+            {
+                "invoiceNumber": "2063nnhqr9",
+                "invoiceDate": "2026-04-28",
+                "startDate": "2026-04-01",
+                "endDate": "2026-04-30",
+                "clientRole": "ORGANISATION_ROLE_RD",
+                "contractId": "5433538",
+                "contractorRole": "ORGANISATION_ROLE_RR",
+                "servicePrice": {
+                    "amount": "20000",
+                    "vatRate": "",
+                    "excludingAmount": "20000",
+                    "withNdsSelected": False,
+                },
+            }
+        )
+
+        self.assertIn("key.invoiceNumber=2063nnhqr9", query)
+        self.assertIn("key.servicePrice.vatRate=", query)
+        self.assertIn("key.servicePrice.withNdsSelected=false", query)
 
 
 class ValidateCookieTest(unittest.TestCase):

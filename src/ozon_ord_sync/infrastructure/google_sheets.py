@@ -11,6 +11,32 @@ DEFAULT_SHEET_URL = (
     "1PuvoA3GcHIger8bXYR0uY_jIhj_3LZ7ieypF1IcGcIw/edit?gid=0#gid=0"
 )
 DEFAULT_PLATFORM_SHEET_NAME = "Лист3"
+DEFAULT_DOCUMENT_CHECK_SHEET_URL = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1BJv67-dXhoRoeNmY4zHP9kLOsshFPQbdjmQ9rHnsaAw/edit?gid=0#gid=0"
+)
+DEFAULT_CREATIVE_SHEET_URL = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1Ix4o8_aHqxa3ySfYbtYG43l9d_zNGGqXKW-Tk8zLmGM/edit?gid=0#gid=0"
+)
+
+
+def google_sheet_id(sheet_url: str) -> str:
+    match = re.search(
+        r"/spreadsheets/d/([^/]+)", urllib.parse.urlparse(sheet_url).path
+    )
+    if not match:
+        raise ValueError("Unsupported Google Sheets URL format")
+    return match.group(1)
+
+
+def google_sheet_id(sheet_url: str) -> str:
+    parsed = urllib.parse.urlparse(sheet_url)
+    path_match = re.search(r"/spreadsheets/d/([^/]+)", parsed.path)
+    if not path_match:
+        raise ValueError("Unsupported Google Sheets URL format")
+    return path_match.group(1)
+
 
 
 def google_sheet_csv_url(
@@ -19,11 +45,7 @@ def google_sheet_csv_url(
     sheet_name: str | None = None,
 ) -> str:
     parsed = urllib.parse.urlparse(sheet_url)
-    path_match = re.search(r"/spreadsheets/d/([^/]+)", parsed.path)
-    if not path_match:
-        raise ValueError("Unsupported Google Sheets URL format")
-
-    sheet_id = path_match.group(1)
+    sheet_id = google_sheet_id(sheet_url)
     if sheet_name is not None:
         return (
             f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq"

@@ -17,9 +17,45 @@ class AppsScriptClient:
         self.timeout = timeout
 
     def update_platform_errors(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
-        payload: dict[str, Any] = {"action": "update_platform_errors", "rows": rows}
+        return self._post({"action": "update_platform_errors", "rows": rows})
+
+    def update_document_checks(
+        self,
+        rows: list[dict[str, Any]],
+        spreadsheet_id: str,
+        sheet_name: str | None = None,
+        check_column: str = "Проверка",
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "action": "update_document_checks",
+            "rows": rows,
+            "spreadsheet_id": spreadsheet_id,
+            "check_column": check_column,
+        }
+        if sheet_name:
+            payload["sheet_name"] = sheet_name
+        return self._post(payload)
+
+    def update_creative_erids(
+        self,
+        rows: list[dict[str, Any]],
+        spreadsheet_id: str,
+        sheet_name: str | None = None,
+        erid_column: str = "erid",
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "action": "update_creative_erids",
+            "rows": rows,
+            "spreadsheet_id": spreadsheet_id,
+            "erid_column": erid_column,
+        }
+        if sheet_name:
+            payload["sheet_name"] = sheet_name
+        return self._post(payload)
+
+    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.token:
-            payload["token"] = self.token
+            payload = {**payload, "token": self.token}
 
         request = urllib.request.Request(
             url=self.web_app_url,

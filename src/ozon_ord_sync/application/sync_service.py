@@ -417,46 +417,78 @@ def extract_statistic_creation_errors(
     error_message: str,
     resolved_statistics: list[ResolvedStatisticPayload],
 ) -> list[str]:
-    row_numbers = extract_duplicate_statistic_row_numbers(
+    details_by_row = _duplicate_statistic_details_by_row(
         error_message, resolved_statistics
     )
-    duplicate_message = "Креатив уже есть в базе"
-    return [f"Row {row_number}: {duplicate_message}" for row_number in row_numbers]
+    return [
+        f"Row {row_number}: {details_by_row.get(row_number, 'Креатив уже есть в базе')}"
+        for row_number in extract_duplicate_statistic_row_numbers(
+            error_message, resolved_statistics
+        )
+    ]
 
 
 def extract_duplicate_statistic_row_numbers(
     error_message: str,
     resolved_statistics: list[ResolvedStatisticPayload],
 ) -> list[int]:
-    duplicate_marker = "Статистика уже создана"
-    if duplicate_marker not in error_message:
-        return []
+    return sorted(
+        _duplicate_statistic_details_by_row(error_message, resolved_statistics).keys()
+    )
 
-    row_numbers: set[int] = set()
+
+def _duplicate_statistic_details_by_row(
+    error_message: str,
+    resolved_statistics: list[ResolvedStatisticPayload],
+) -> dict[int, str]:
+    if not _is_duplicate_statistic_error(error_message):
+        return {}
+
+    details_by_row: dict[int, str] = {}
     indexed_rows = {
         index: item.row_number for index, item in enumerate(resolved_statistics)
     }
     creative_rows = {
         item.payload.creativeId: item.row_number for item in resolved_statistics
     }
+    keyed_rows: dict[tuple[str, str, str], int] = {}
+    for item in resolved_statistics:
+        payload = item.payload
+        for month in {
+            payload.dateStartFact.strftime("%Y-%m"),
+            payload.dateEndFact.strftime("%Y-%m"),
+        }:
+            keyed_rows[(payload.creativeId, payload.platformId, month)] = item.row_number
 
+    entries = _collect_duplicate_statistic_entries_from_text(error_message)
     payload = _extract_json_payload_from_error_message(error_message)
     if payload is not None:
-        for entry in _collect_duplicate_statistic_entries(payload):
-            row_number = entry.get("row_number")
-            index = entry.get("index")
-            creative_id = entry.get("creative_id")
-            if row_number is None and isinstance(index, int):
-                row_number = indexed_rows.get(index)
-            if row_number is None and isinstance(creative_id, str):
-                row_number = creative_rows.get(creative_id)
-            if row_number:
-                row_numbers.add(row_number)
+        entries.extend(_collect_duplicate_statistic_entries(payload))
 
-    if not row_numbers and len(resolved_statistics) == 1:
-        row_numbers.add(resolved_statistics[0].row_number)
+    for entry in entries:
+        row_number = entry.get("row_number")
+        index = entry.get("index")
+        creative_id = entry.get("creative_id")
+        platform_id = entry.get("platform_id")
+        month = entry.get("month")
+        if row_number is None and isinstance(index, int):
+            row_number = indexed_rows.get(index)
+        if (
+            row_number is None
+            and isinstance(creative_id, str)
+            and isinstance(platform_id, str)
+            and isinstance(month, str)
+        ):
+            row_number = keyed_rows.get((creative_id, platform_id, month))
+        if row_number is None and isinstance(creative_id, str):
+            row_number = creative_rows.get(creative_id)
+        if row_number:
+            details_by_row[row_number] = _format_duplicate_statistic_error(entry)
 
-    return sorted(row_numbers)
+    if not details_by_row and len(resolved_statistics) == 1:
+        details_by_row[resolved_statistics[0].row_number] = "Креатив уже есть в базе"
+
+    return details_by_row
 
 
 def split_resolution_errors(errors: list[str]) -> tuple[list[str], list[str]]:
@@ -495,6 +527,39 @@ def _extract_json_payload_from_error_message(error_message: str) -> Any | None:
     return None
 
 
+def _is_duplicate_statistic_error(error_message: str) -> bool:
+    return any(
+        marker in error_message
+        for marker in ("Статистика уже создана", "Продублирована статистика")
+    )
+
+
+def _collect_duplicate_statistic_entries_from_text(
+    text: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "creative_id": match.group(1),
+            "platform_id": match.group(2),
+            "month": match.group(3),
+        }
+        for match in re.finditer(
+            r"Продублирована статистика для креатива:\s*(\d+)\s+"
+            r"и площадки:\s*(\d+)\s+за данный месяц:\s*(\d{4}-\d{2})",
+            text,
+        )
+    ]
+
+
+def _format_duplicate_statistic_error(entry: dict[str, Any]) -> str:
+    creative_id = entry.get("creative_id")
+    platform_id = entry.get("platform_id")
+    month = entry.get("month")
+    if creative_id and platform_id and month:
+        return f"Дубль статистики: креатив {creative_id}, площадка {platform_id}, месяц {month}"
+    return "Креатив уже есть в базе"
+
+
 def _collect_duplicate_statistic_entries(payload: Any) -> list[dict[str, Any]]:
     collected: list[dict[str, Any]] = []
 
@@ -506,14 +571,22 @@ def _collect_duplicate_statistic_entries(payload: Any) -> list[dict[str, Any]]:
                 if key in {"message", "error", "detail", "description", "text"}
                 and isinstance(value, str)
             ]
-            if any("Статистика уже создана" in message for message in messages):
-                collected.append(
-                    {
-                        "index": _extract_index_from_node(node),
-                        "creative_id": _extract_creative_id_from_node(node),
-                        "row_number": _extract_row_number_from_node(node),
-                    }
-                )
+            if any(_is_duplicate_statistic_error(message) for message in messages):
+                text_entries = [
+                    entry
+                    for message in messages
+                    for entry in _collect_duplicate_statistic_entries_from_text(message)
+                ]
+                collected.extend(text_entries)
+                if not text_entries:
+                    collected.append(
+                        {
+                            "index": _extract_index_from_node(node),
+                            "creative_id": _extract_creative_id_from_node(node),
+                            "platform_id": _extract_platform_id_from_node(node),
+                            "row_number": _extract_row_number_from_node(node),
+                        }
+                    )
 
             for value in node.values():
                 walk(value)
@@ -544,6 +617,14 @@ def _extract_index_from_node(node: dict[str, Any]) -> int | None:
 
 def _extract_creative_id_from_node(node: dict[str, Any]) -> str | None:
     for key in ("creativeId", "creative_id", "externalCreativeId", "marker"):
+        value = node.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _extract_platform_id_from_node(node: dict[str, Any]) -> str | None:
+    for key in ("platformId", "platform_id", "externalPlatformId"):
         value = node.get(key)
         if isinstance(value, str) and value:
             return value

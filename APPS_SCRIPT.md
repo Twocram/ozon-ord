@@ -69,11 +69,83 @@ function doPost(e) {
       return jsonResponse({ ok: false, error: 'unauthorized' });
     }
 
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+
+    if (payload.action === 'update_creative_erids') {
+      // Writes erid values into the creative spreadsheet (a different document),
+      // opened by the spreadsheet_id passed from the script.
+      const eridSpreadsheet = payload.spreadsheet_id
+        ? SpreadsheetApp.openById(payload.spreadsheet_id)
+        : SpreadsheetApp.openById(SPREADSHEET_ID);
+      const eridSheet = payload.sheet_name
+        ? eridSpreadsheet.getSheetByName(payload.sheet_name)
+        : eridSpreadsheet.getSheets()[0];
+
+      if (!eridSheet) {
+        return jsonResponse({ ok: false, error: 'sheet_not_found' });
+      }
+
+      const eridHeader = eridSheet
+        .getRange(1, 1, 1, eridSheet.getLastColumn())
+        .getValues()[0];
+      const eridColumnName = payload.erid_column || 'erid';
+      const eridColumnIndex = eridHeader.indexOf(eridColumnName) + 1;
+
+      if (eridColumnIndex === 0) {
+        return jsonResponse({ ok: false, error: 'erid_column_not_found' });
+      }
+
+      const eridUpdated = [];
+      rows.forEach((row) => {
+        const rowNumber = Number(row.row_number);
+        if (rowNumber >= 2 && row.erid) {
+          eridSheet.getRange(rowNumber, eridColumnIndex).setValue(row.erid);
+          eridUpdated.push({ row_number: rowNumber, erid: row.erid });
+        }
+      });
+
+      return jsonResponse({ ok: true, updated: eridUpdated });
+    }
+
+    if (payload.action === 'update_document_checks') {
+      const checkSpreadsheet = payload.spreadsheet_id
+        ? SpreadsheetApp.openById(payload.spreadsheet_id)
+        : SpreadsheetApp.openById(SPREADSHEET_ID);
+      const checkSheet = payload.sheet_name
+        ? checkSpreadsheet.getSheetByName(payload.sheet_name)
+        : checkSpreadsheet.getSheets()[0];
+
+      if (!checkSheet) {
+        return jsonResponse({ ok: false, error: 'sheet_not_found' });
+      }
+
+      const checkHeader = checkSheet
+        .getRange(1, 1, 1, checkSheet.getLastColumn())
+        .getValues()[0];
+      const checkColumnName = payload.check_column || 'Проверка';
+      const checkColumnIndex = checkHeader.indexOf(checkColumnName) + 1;
+
+      if (checkColumnIndex === 0) {
+        return jsonResponse({ ok: false, error: 'check_column_not_found' });
+      }
+
+      const checkUpdated = [];
+      rows.forEach((row) => {
+        const rowNumber = Number(row.row_number);
+        const value = row.value || row.check || 'Проверьте вручную';
+        if (rowNumber >= 2) {
+          checkSheet.getRange(rowNumber, checkColumnIndex).setValue(value);
+          checkUpdated.push({ row_number: rowNumber, value });
+        }
+      });
+
+      return jsonResponse({ ok: true, updated: checkUpdated });
+    }
+
     if (payload.action !== 'update_platform_errors') {
       return jsonResponse({ ok: false, error: 'unsupported_action' });
     }
 
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = SHEET_NAME
       ? spreadsheet.getSheetByName(SHEET_NAME)
@@ -185,6 +257,56 @@ Python отправляет в Apps Script JSON такого формата:
   ]
 }
 ```
+
+## Запись erid в таблицу креативов (другой документ)
+
+Таблица креативов — это **отдельный** Google-документ (не таблица статистики). Тем не менее **отдельный Apps Script создавать не нужно**: тот же самый Web App пишет и в таблицу статистики (ошибки), и в таблицу креативов (erid). Скрипт открывает нужный документ через `SpreadsheetApp.openById(...)`, а Python передаёт `spreadsheet_id` таблицы креативов в запросе.
+
+Что делает команда: после создания креатива в ОЗОН ОРД получает его `erid` (marker) и записывает его в колонку `erid` соответствующей строки таблицы креативов.
+
+### Что нужно сделать один раз
+
+1. **Добавьте колонку в таблицу креативов.** Заголовок (первая строка) должен быть ровно `erid`. Если назовёте иначе — скажите, поменяю значение по умолчанию в коде.
+
+2. **Обновите код Apps Script.** Откройте **тот же** проект скрипта на `https://script.google.com/`, который уже используется для записи ошибок (если его ещё нет — сначала создайте по инструкции выше). Полностью замените содержимое `Code.gs` на актуальный код из раздела [2. Создать Google Apps Script](#2-создать-google-apps-script) выше — он теперь поддерживает действие `update_creative_erids`.
+
+   Константу `SPREADSHEET_ID` менять **не нужно** — она остаётся id таблицы статистики (используется для записи ошибок и как запасной вариант). Для записи erid документ открывается по `spreadsheet_id` из запроса.
+
+3. **Дайте доступ.** Аккаунт Google, под которым скрипт выполняется (`Execute as: Me`), должен иметь права **редактора** на таблицу креативов. Если таблицу создавал другой человек — расшарьте её на этот аккаунт с правом «Редактор».
+
+4. **Передеплойте.** `Deploy` -> `Manage deployments` -> у активного деплоя нажмите «карандаш» -> `Version: New version` -> `Deploy`.
+
+   > Важно: без новой версии деплоя Web App продолжит отдавать старый код. URL при этом **не меняется** — тот же `GOOGLE_APPS_SCRIPT_WEB_APP_URL` в `.env` подходит.
+
+5. **Проверьте `.env`.** Должен быть задан `GOOGLE_APPS_SCRIPT_WEB_APP_URL` (тот же URL). Если используете `SCRIPT_TOKEN` — тот же `GOOGLE_APPS_SCRIPT_TOKEN`.
+
+### Как запускать
+
+```bash
+# Только чтение договоров + сверка (ничего не создаёт, erid не пишет):
+python3 main.py read-creative-contracts
+
+# Создать недостающих контрагентов/договоры/креативы и записать erid в таблицу:
+python3 main.py read-creative-contracts --create-missing
+```
+
+erid пишется только при `--create-missing` (marker появляется лишь при создании креатива). Если `GOOGLE_APPS_SCRIPT_WEB_APP_URL` не задан, создание пройдёт, но erid в таблицу не запишется (без ошибки).
+
+Формат запроса, который шлёт Python:
+
+```json
+{
+  "action": "update_creative_erids",
+  "token": "optional_shared_secret",
+  "spreadsheet_id": "1Ix4o8_aHqxa3ySfYbtYG43l9d_zNGGqXKW-Tk8zLmGM",
+  "erid_column": "erid",
+  "rows": [
+    { "row_number": 2, "erid": "2W5zFGTPAL1" }
+  ]
+}
+```
+
+Возможные ошибки в ответе: `sheet_not_found`, `erid_column_not_found` (нет колонки `erid` в заголовке), `unauthorized` (не совпал `SCRIPT_TOKEN`).
 
 ## Что важно помнить
 

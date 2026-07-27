@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ozon_ord_sync.application.sync_workflows import (
+    run_document_check_preview,
     run_extension_statistics_prepare,
     run_platform_preview,
     run_platform_sync,
@@ -21,6 +22,7 @@ from ozon_ord_sync.config.runtime_auth import (
     stored_cookie_status,
 )
 from ozon_ord_sync.infrastructure.google_sheets import (
+    DEFAULT_DOCUMENT_CHECK_SHEET_URL,
     DEFAULT_PLATFORM_SHEET_NAME,
     DEFAULT_SHEET_URL,
 )
@@ -69,6 +71,9 @@ class _ApiHandler(BaseHTTPRequestHandler):
                 "hasApiToken": bool(os.getenv(API_TOKEN_ENV)),
                 "hasAppsScript": bool(os.getenv("GOOGLE_APPS_SCRIPT_WEB_APP_URL")),
                 "defaultSheetUrlConfigured": bool(DEFAULT_SHEET_URL),
+                "defaultDocumentCheckSheetUrlConfigured": bool(
+                    DEFAULT_DOCUMENT_CHECK_SHEET_URL
+                ),
                 "defaultPlatformSheetName": DEFAULT_PLATFORM_SHEET_NAME,
             }
         )
@@ -91,6 +96,9 @@ class _ApiHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/preview/statistics":
                 self._handle_statistics_preview(payload)
+                return
+            if path == "/api/preview/document-check":
+                self._handle_document_check_preview(payload)
                 return
             if path == "/api/preview/platforms":
                 self._handle_platform_preview(payload)
@@ -207,6 +215,13 @@ class _ApiHandler(BaseHTTPRequestHandler):
             status=HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST,
         )
 
+    def _handle_document_check_preview(self, payload: dict[str, Any]) -> None:
+        result = run_document_check_preview(
+            sheet_url=self._document_check_sheet_url(payload),
+            limit=self._read_int(payload, "limit", default=3, minimum=0),
+        )
+        self._send_json(result.to_dict())
+
     def _handle_statistics_preview(self, payload: dict[str, Any]) -> None:
         result = run_statistics_preview(
             sheet_url=self._sheet_url(payload),
@@ -252,6 +267,13 @@ class _ApiHandler(BaseHTTPRequestHandler):
 
     def _sheet_url(self, payload: dict[str, Any]) -> str:
         return str(payload.get("sheetUrl") or DEFAULT_SHEET_URL)
+
+    def _document_check_sheet_url(self, payload: dict[str, Any]) -> str:
+        return str(
+            payload.get("documentCheckSheetUrl")
+            or payload.get("sheetUrl")
+            or DEFAULT_DOCUMENT_CHECK_SHEET_URL
+        )
 
     def _platform_sheet_name(self, payload: dict[str, Any]) -> str:
         return str(payload.get("platformSheetName") or DEFAULT_PLATFORM_SHEET_NAME)
