@@ -16,6 +16,7 @@ from ozon_ord_sync.application.sync_workflows import (
     run_statistics_preview,
     run_statistics_sync,
 )
+from ozon_ord_sync.config.factories import build_admin_ozon_ord_client_from_env
 from ozon_ord_sync.config.runtime_auth import (
     apply_stored_ozon_cookie,
     save_ozon_cookie,
@@ -26,7 +27,6 @@ from ozon_ord_sync.infrastructure.google_sheets import (
     DEFAULT_PLATFORM_SHEET_NAME,
     DEFAULT_SHEET_URL,
 )
-from ozon_ord_sync.config.factories import build_admin_ozon_ord_client_from_env
 from ozon_ord_sync.infrastructure.ozon_ord import OzonOrdApiError
 
 API_TOKEN_ENV = "OZON_ORD_SYNC_API_TOKEN"

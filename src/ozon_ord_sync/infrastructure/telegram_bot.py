@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import re
 from typing import Any
 
 START_TEXT = (

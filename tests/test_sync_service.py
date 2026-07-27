@@ -7,7 +7,10 @@ from ozon_ord_sync.application.sync_service import (
     extract_duplicate_statistic_row_numbers,
     extract_statistic_creation_errors,
 )
-from ozon_ord_sync.domain.models import OzonOrdAdminStatisticPayload, ResolvedStatisticPayload
+from ozon_ord_sync.domain.models import (
+    OzonOrdAdminStatisticPayload,
+    ResolvedStatisticPayload,
+)
 
 
 class DuplicateStatisticErrorTest(unittest.TestCase):

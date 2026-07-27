@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import tempfile
 from dataclasses import asdict, dataclass
 from decimal import Decimal

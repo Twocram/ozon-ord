@@ -30,15 +30,6 @@ def google_sheet_id(sheet_url: str) -> str:
     return match.group(1)
 
 
-def google_sheet_id(sheet_url: str) -> str:
-    parsed = urllib.parse.urlparse(sheet_url)
-    path_match = re.search(r"/spreadsheets/d/([^/]+)", parsed.path)
-    if not path_match:
-        raise ValueError("Unsupported Google Sheets URL format")
-    return path_match.group(1)
-
-
-
 def google_sheet_csv_url(
     sheet_url: str,
     gid: str | int | None = None,

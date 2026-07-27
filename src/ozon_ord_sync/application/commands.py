@@ -7,7 +7,9 @@ from ozon_ord_sync.application.contract_channel_checker import (
     build_contract_channel_check_rows,
 )
 from ozon_ord_sync.application.contract_reader import read_contracts_from_creative_sheet
-from ozon_ord_sync.application.invoice_payload_builder import build_invoice_payload_drafts
+from ozon_ord_sync.application.invoice_payload_builder import (
+    build_invoice_payload_drafts,
+)
 from ozon_ord_sync.application.receipt_parser import read_receipts_from_sheet
 from ozon_ord_sync.application.sync_workflows import (
     run_creative_preview,
@@ -23,7 +25,6 @@ from ozon_ord_sync.config.factories import (
     build_external_ozon_ord_client_from_env,
 )
 from ozon_ord_sync.infrastructure.google_sheets import google_sheet_id
-
 
 
 def mark_contract_channel_checks(sheet_url: str, send: bool) -> int:

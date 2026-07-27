@@ -7,7 +7,6 @@ from decimal import Decimal
 
 from ozon_ord_sync.application.sheet_parser import parse_decimal
 
-
 LEGAL_TYPE_ENTREPRENEUR = "LEGAL_TYPE_ENTREPRENEUR"
 LEGAL_TYPE_INDIVIDUAL = "LEGAL_TYPE_INDIVIDUAL"
 PERFORMER_STATUS_ENTREPRENEUR = "entrepreneur"

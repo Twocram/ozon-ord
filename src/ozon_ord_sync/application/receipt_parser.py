@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from ozon_ord_sync.application.name_matching import is_noise_word
-from ozon_ord_sync.application.sheet_parser import parse_decimal, parse_document_check_sheet
+from ozon_ord_sync.application.sheet_parser import (
+    parse_decimal,
+    parse_document_check_sheet,
+)
 from ozon_ord_sync.infrastructure.document_text import extract_document_text
 from ozon_ord_sync.infrastructure.drive_files import download_drive_file
 from ozon_ord_sync.infrastructure.lknpd import receipt_exists
