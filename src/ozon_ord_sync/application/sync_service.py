@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
+from urllib.parse import urlparse
 
 from ozon_ord_sync.domain.mapping import (
     build_platform_payload,
@@ -250,13 +251,12 @@ def resolve_platform_ids(
     client: ExternalOzonOrdClient,
     external_platform_urls: dict[str, str],
 ) -> tuple[dict[str, str], list[str]]:
-    target_urls = {
-        url.rstrip("/"): external_id
-        for external_id, url in external_platform_urls.items()
-    }
+    target_urls: dict[str, list[str]] = {}
+    for external_id, url in external_platform_urls.items():
+        target_urls.setdefault(_canonical_platform_url(url), []).append(external_id)
     found_by_external_id: dict[str, str] = {}
     matches_by_external_id: dict[str, list[str]] = {
-        external_id: [] for external_id in target_urls.values()
+        external_id: [] for external_id in external_platform_urls
     }
     errors: list[str] = []
     cursor_external_id = ""
@@ -275,12 +275,13 @@ def resolve_platform_ids(
         for platform in platforms:
             external_id = platform.get("externalId")
             platform_id = platform.get("platformId")
-            platform_url = (platform.get("url") or "").rstrip("/")
-            matched_external_id = target_urls.get(platform_url)
-            if matched_external_id and platform_id:
-                matches = matches_by_external_id[matched_external_id]
-                if platform_id not in matches:
-                    matches.append(platform_id)
+            platform_url = _canonical_platform_url(platform.get("url") or "")
+            matched_external_ids = target_urls.get(platform_url, [])
+            if platform_id:
+                for matched_external_id in matched_external_ids:
+                    matches = matches_by_external_id[matched_external_id]
+                    if platform_id not in matches:
+                        matches.append(platform_id)
 
         last = platforms[-1]
         cursor_external_id = last.get("externalId") or ""
@@ -301,6 +302,12 @@ def resolve_creative_ids(
     markers: list[str],
 ) -> tuple[dict[str, str], list[str]]:
     target_markers = set(markers)
+    targets_by_casefold: dict[str, list[str]] = {}
+    for marker in target_markers:
+        targets_by_casefold.setdefault(marker.casefold(), []).append(marker)
+    casefold_matches: dict[str, list[str]] = {
+        marker: [] for marker in target_markers
+    }
     found: dict[str, str] = {}
     cursor_external_id = ""
     cursor_updated_at = None
@@ -321,6 +328,10 @@ def resolve_creative_ids(
             creative_id = creative.get("creativeId")
             if marker in target_markers and creative_id:
                 found[marker] = creative_id
+            elif isinstance(marker, str) and creative_id:
+                for target in targets_by_casefold.get(marker.casefold(), []):
+                    if creative_id not in casefold_matches[target]:
+                        casefold_matches[target].append(creative_id)
 
         if target_markers.issubset(found.keys()):
             break
@@ -331,10 +342,23 @@ def resolve_creative_ids(
         cursor_updated_at = {"updatedAt": updated_at} if updated_at else None
 
     for marker in target_markers:
+        if marker not in found and len(casefold_matches[marker]) == 1:
+            found[marker] = casefold_matches[marker][0]
         if marker not in found:
             errors.append(f"Creative marker not found: {marker}")
 
     return found, errors
+
+
+def _canonical_platform_url(url: str) -> str:
+    normalized = url.strip().rstrip("/")
+    parsed = urlparse(normalized)
+    if (parsed.hostname or "").casefold() in {"t.me", "www.t.me", "telegram.me"}:
+        first_path_part = parsed.path.strip("/").split("/", 1)[0]
+        if first_path_part and not first_path_part.startswith("+"):
+            first_path_part = first_path_part.casefold()
+        return f"https://t.me/{first_path_part}"
+    return normalized
 
 
 def _extract_row_number(comment: str) -> int:
