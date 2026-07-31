@@ -141,7 +141,7 @@ def _build_row_draft(
     issues.extend(_check_issues(checks))
     if payload is not None and contract is not None and admin_client is not None:
         _resolve_ord_entities(payload, contract, admin_client, issues)
-    issues.extend(_missing_payload_issues(payload))
+    issues.extend(_missing_payload_issues(payload, receipt))
 
     return InvoicePayloadDraft(
         row_number=row.row_number,
@@ -208,7 +208,8 @@ def _payload_from_parts(
         "rrOrderContractLabels": [],
         "startDate": period[0].isoformat() if period else None,
         "invoiceDate": invoice_date.isoformat() if invoice_date else None,
-        "invoiceNumber": receipt.receipt_number if receipt else None,
+        # A numberless act form is registered with an empty act number.
+        "invoiceNumber": (receipt.receipt_number or "") if receipt else None,
         "isSelfPromo": False,
         "invoiceType": "INVOICE_TYPE_INVOICE",
         "contractDate": contract.contract_date.isoformat()
@@ -407,7 +408,10 @@ def _check_issues(checks: dict[str, bool | None]) -> list[str]:
     return [f"check failed: {key}" for key, value in checks.items() if value is False]
 
 
-def _missing_payload_issues(payload: dict[str, Any] | None) -> list[str]:
+def _missing_payload_issues(
+    payload: dict[str, Any] | None,
+    receipt: ReceiptInfo | None = None,
+) -> list[str]:
     if payload is None:
         return []
     required = [
@@ -421,6 +425,10 @@ def _missing_payload_issues(payload: dict[str, Any] | None) -> list[str]:
         "customerName",
         "performerName",
     ]
+    if receipt is not None and receipt.number_optional:
+        # "Акт сдачи-приемки оказанных услуг" has no number to read — register it
+        # with an empty act number rather than holding the row back.
+        required.remove("invoiceNumber")
     issues = [f"payload missing: {key}" for key in required if not payload.get(key)]
     if not payload["contracts"][0].get("creatives"):
         issues.append("payload missing: contracts[0].creatives")

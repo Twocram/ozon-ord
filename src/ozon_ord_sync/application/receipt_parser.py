@@ -96,6 +96,13 @@ _ID_HOMOGLYPHS = {
     "х": "x",
 }
 
+# Letter-style act forms with a title and a date but no number field at all.
+_NUMBERLESS_ACT_RE = re.compile(
+    r"акт\s+(?:сдачи[-\s]*при[её]мки|при[её]м(?:а|ки)[-\s]*передачи|"
+    r"сдачи\s+и\s+при[её]мки)",
+    re.IGNORECASE,
+)
+
 _MONTHS_GENITIVE = {
     "января": 1,
     "февраля": 2,
@@ -145,6 +152,7 @@ class ReceiptInfo:
     text: str
     seller_name_confidence: str | None = None
     receipt_number_verified: bool | None = None
+    number_optional: bool = False
 
 
 @dataclass
@@ -248,7 +256,18 @@ def parse_receipt_text(text: str, source_url: str | None = None) -> ReceiptInfo:
         inns=inns,
         text=text,
         seller_name_confidence=seller_name_confidence,
+        number_optional=is_numberless_act_form(text),
     )
+
+
+def is_numberless_act_form(text: str) -> bool:
+    """Whether the document is an act form that carries no number by design.
+
+    "Акт сдачи-приемки оказанных услуг" is a letter-style act: a title, a date and
+    the body, with nowhere to put a number. Such a row is registered in ORD with an
+    empty act number instead of being held back as incomplete.
+    """
+    return bool(_NUMBERLESS_ACT_RE.search(_document_heading(text)))
 
 
 def self_employed_receipt_number_is_valid(
@@ -530,10 +549,11 @@ def _parse_lknpd_datetime(text: str) -> datetime | None:
 
 def _parse_act_date(text: str) -> datetime | None:
     heading = _document_heading(text)
-    # "от 30 апреля 2026 г." and the contract-style "г. Москва «8» июля 2026 года".
-    # The month name has to be a real one, so scan until one matches.
+    # "от 30 апреля 2026 г." and the contract-style "г. Москва «20 » мая 2026 года"
+    # — the closing quote of the day is typed with stray spaces around it. The month
+    # name has to be a real one, so scan until one matches.
     for match in re.finditer(
-        r"«?(\d{1,2})»?\s+([а-яё]+)\s+(\d{4})",
+        r"«?\s*(\d{1,2})\s*»?\s+([а-яё]+)\s+(\d{4})",
         heading,
         flags=re.IGNORECASE,
     ):
@@ -544,8 +564,10 @@ def _parse_act_date(text: str) -> datetime | None:
                 datetime.min.time(),
             )
 
+    # Bounded by "not a digit" rather than by \b: acts are typed as
+    # «05.06.2026г.», and the Cyrillic г glued to the year leaves no word boundary.
     numeric = re.search(
-        r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b",
+        r"(?<!\d)(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})(?!\d)",
         heading,
     )
     if numeric:
@@ -553,7 +575,7 @@ def _parse_act_date(text: str) -> datetime | None:
         year += 2000 if year < 100 else 0
         return datetime(year, month, day)
 
-    iso = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", heading)
+    iso = re.search(r"(?<!\d)(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)", heading)
     if iso:
         year, month, day = map(int, iso.groups())
         return datetime(year, month, day)

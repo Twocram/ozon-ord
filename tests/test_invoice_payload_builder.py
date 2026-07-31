@@ -337,6 +337,63 @@ class InvoicePayloadBuilderTest(unittest.TestCase):
         )
 
 
+class NumberlessActRowTest(unittest.TestCase):
+    CONTRACT_TEXT = "\n".join([
+        "Договор оказания рекламных услуг № 01052026/1",
+        "г. Москва 01 мая 2026г.",
+        "именуемое в дальнейшем «Заказчик», и Индивидуальный предприниматель",
+        "Синицин Николай Дмитриевич, зарегистрированный, ОГРНИП 326710000006478",
+        "ИТОГО: 7778 руб. НДС не облагается",
+    ])
+
+    def _draft(self, act_text: str):
+        row = document_check_row(payment_amount=Decimal("7778.00"), counterparty="ИП Синицин")
+
+        def fake_text(path: Path, content_type: str | None = None) -> str:
+            return act_text if path.name == "receipt-url" else self.CONTRACT_TEXT
+
+        with (
+            patch(
+                "ozon_ord_sync.application.invoice_payload_builder.parse_document_check_sheet",
+                return_value=([], [row]),
+            ),
+            patch(
+                "ozon_ord_sync.application.invoice_payload_builder.download_drive_file",
+                side_effect=lambda url, target_dir: type(
+                    "Downloaded",
+                    (),
+                    {"path": target_dir / url, "content_type": "text/plain"},
+                )(),
+            ),
+            patch(
+                "ozon_ord_sync.application.invoice_payload_builder.extract_document_text",
+                side_effect=fake_text,
+            ),
+        ):
+            return build_invoice_payload_drafts("sheet")[0]
+
+    def test_registers_a_numberless_act_with_an_empty_number(self) -> None:
+        draft = self._draft(
+            "\n".join([
+                "Акт сдачи-приемки оказанных услуг",
+                "г. Москва «20 » мая 2026 года.",
+                "Индивидуальный предприниматель Синицин Николай Дмитриевич",
+                "Итоги: 7 778",
+            ])
+        )
+
+        self.assertNotIn("payload missing: invoiceNumber", draft.issues)
+        self.assertEqual(draft.payload["invoiceNumber"], "")
+        self.assertEqual(draft.payload["invoiceDate"], "2026-05-20")
+
+    def test_other_acts_still_need_a_number(self) -> None:
+        draft = self._draft(
+            "Акт об оказании услуг от 20 мая 2026 г.\nИП Синицин Николай Дмитриевич"
+        )
+
+        self.assertIn("payload missing: invoiceNumber", draft.issues)
+
+
 class VatRowTest(unittest.TestCase):
     def test_charged_vat_is_noted_but_does_not_block_the_row(self) -> None:
         row = document_check_row(row_number=5, counterparty="ИП Иванов")

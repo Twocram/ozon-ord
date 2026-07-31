@@ -16,6 +16,7 @@ from ozon_ord_sync.application.receipt_parser import (
     DOCUMENT_TYPE_RECEIPT,
     document_type_error,
     extract_person_name,
+    is_numberless_act_form,
     parse_receipt_text,
     resolve_receipt_id,
     self_employed_receipt_number_error,
@@ -46,6 +47,17 @@ class ReceiptParserTest(unittest.TestCase):
         )
 
         self.assertEqual(receipt.issued_at, datetime(2026, 7, 8))
+
+    def test_extracts_date_with_the_year_glued_to_a_cyrillic_suffix(self) -> None:
+        for heading, day in (
+            ("Акт No1 от «05.06.2026г.»", 5),
+            ("Акт № 1 от 05.06.2026г.", 5),
+            ("Акт No 12 от «7.6.26г.»", 7),
+        ):
+            receipt = parse_receipt_text(heading)
+
+            self.assertEqual(receipt.issued_at, datetime(2026, 6, day), heading)
+            self.assertIsNotNone(receipt.receipt_number, heading)
 
     def test_extracts_iso_date(self) -> None:
         receipt = parse_receipt_text("Акт номер A-7 от 2026-05-07")
@@ -193,6 +205,39 @@ class ReceiptNumberTest(unittest.TestCase):
             parse_receipt_text("Чек № б/н от 11.06.2026").receipt_number,
             "б/н",
         )
+
+
+class NumberlessActTest(unittest.TestCase):
+    """"Акт сдачи-приемки оказанных услуг": a title, a date, and no number at all."""
+
+    ACT = "\n".join([
+        "Акт сдачи-приемки оказанных услуг",
+        "г. Москва «20 » мая 2026 года.",
+        "Общество с ограниченной ответственностью “100балльный репетитор” (ООО “100балльный",
+        "репетитор», в лице генерального директора Золотухина Александра Михайловича",
+        "Индивидуальный предприниматель Синицин Николай Дмитриевич, действующий на основании",
+        "ОГРНИП 326710000006478, именуемый в дальнейшем «Исполнитель»",
+        "Итоги: 7 778",
+    ])
+
+    def test_reads_the_date_typed_with_stray_spaces_in_quotes(self) -> None:
+        receipt = parse_receipt_text(self.ACT)
+
+        self.assertEqual(receipt.document_type, DOCUMENT_TYPE_ACT)
+        self.assertEqual(receipt.issued_at, datetime(2026, 5, 20))
+        self.assertIsNone(receipt.receipt_number)
+
+    def test_marks_the_form_as_numberless(self) -> None:
+        self.assertTrue(parse_receipt_text(self.ACT).number_optional)
+        self.assertTrue(is_numberless_act_form("Акт приёма-передачи оказанных услуг"))
+
+    def test_other_act_forms_still_need_a_number(self) -> None:
+        for heading in (
+            "Акт № 7 от 30 мая 2026 г.",
+            "Акт об оказании услуг от 30 мая 2026 г.",
+            "Универсальный передаточный документ",
+        ):
+            self.assertFalse(parse_receipt_text(heading).number_optional, heading)
 
 
 class TransferDocumentTest(unittest.TestCase):
