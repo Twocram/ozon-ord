@@ -6,7 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ozon_ord_sync.infrastructure.ocr import ocr_image
+from ozon_ord_sync.infrastructure.ocr import ocr_image, ocr_pdf
 
 
 class DocumentTextError(RuntimeError):
@@ -28,7 +28,10 @@ print(document.string ?? "")
 
 def extract_document_text(path: Path, content_type: str | None = None) -> str:
     if _is_pdf(path, content_type):
-        return extract_pdf_text(path)
+        text = extract_pdf_text(path)
+        # A photo or a scan wrapped in a PDF has an empty text layer, which used to
+        # leave the whole document unread. Recognise its pages instead.
+        return text if text.strip() else ocr_pdf(path)
     return ocr_image(path)
 
 

@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from ozon_ord_sync.application.contract_lookup import find_ord_contracts
 from ozon_ord_sync.application.contract_parser import ContractInfo, parse_contract_text
 from ozon_ord_sync.application.creative_builder import (
     build_creative_payload,
@@ -339,7 +340,10 @@ def _check_contract(
 
     try:
         existing = _find_contract(
-            admin_client, contract.contract_number, contract.contract_date
+            admin_client,
+            contract.contract_number,
+            contract.contract_date,
+            contract.performer_name,
         )
     except Exception as error:
         return {"found": None, "error": str(error)}
@@ -365,7 +369,10 @@ def _check_contract(
     # Re-search to expose the freshly created contract (with its id) to the caller.
     try:
         created = _find_contract(
-            admin_client, contract.contract_number, contract.contract_date
+            admin_client,
+            contract.contract_number,
+            contract.contract_date,
+            contract.performer_name,
         )
         if created is not None:
             result["contract"] = _contract_summary(created)
@@ -401,17 +408,12 @@ def _find_contract(
     admin_client: AdminOzonOrdClient,
     number: str,
     contract_date: Any,
+    performer_name: str | None = None,
 ) -> dict[str, Any] | None:
-    response = admin_client.list_contracts(
-        {"pageSize": 10, "orderBy": "ASC", "contractNumber": number}
-    )
-    date_iso = contract_date.isoformat() if contract_date else None
-    for item in response.get("contract", []):
-        if item.get("contractNumber") == number and (
-            date_iso is None or item.get("contractDate") == date_iso
-        ):
-            return item
-    return None
+    # Shared with the act pipeline: ORD searches contract numbers by substring and
+    # prints them differently from the PDF, so the match cannot be a plain ==.
+    matches, _ = find_ord_contracts(admin_client, number, contract_date, performer_name)
+    return matches[0] if len(matches) == 1 else None
 
 
 def build_contract_payload(

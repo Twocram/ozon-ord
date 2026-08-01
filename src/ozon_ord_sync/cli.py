@@ -75,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--payload-file")
     parser.add_argument("--output-file")
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Create the act even if ORD already has a duplicate of it",
+    )
+    parser.add_argument(
         "--create-missing",
         action="store_true",
         help="Create missing counterparties in Ozon ORD for read-creative-contracts",
@@ -119,7 +124,7 @@ def main() -> int:
         if args.command == "sync-platforms":
             return sync_platforms(args.sheet_url, args.platform_sheet_name, args.send)
         if args.command == "create-extended-invoice":
-            return create_extended_invoice(args.payload_file, args.send)
+            return create_extended_invoice(args.payload_file, args.send, args.force)
         if args.command == "api":
             run_api_server(args.api_host, args.api_port)
             return 0

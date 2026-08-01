@@ -319,9 +319,33 @@ def _assign(needles: list[str], candidates: list[str]) -> dict[int, int] | None:
 
 
 def _units_match(left: str, right: str) -> bool:
+    left, right = _align_alphabets(left, right)
     if len(left) == 1 or len(right) == 1:
         return left[0] == right[0]
     return _tokens_match(left, right)
+
+
+def _align_alphabets(left: str, right: str) -> tuple[str, str]:
+    """Read a whole-Latin token back as Cyrillic when the other side is Cyrillic.
+
+    A PDF font without a Unicode map renders "АКАЕВА ЕВА" as "AKAEBA EBA": every
+    letter is a Latin look-alike, so the per-token repair (which needs both
+    alphabets inside one word) never fires. Comparing against a Cyrillic name is
+    what reveals the substitution.
+    """
+    if _is_latin(left) and _is_cyrillic(right):
+        return left.translate(_HOMOGLYPHS), right
+    if _is_cyrillic(left) and _is_latin(right):
+        return left, right.translate(_HOMOGLYPHS)
+    return left, right
+
+
+def _is_latin(token: str) -> bool:
+    return all("a" <= char <= "z" for char in token)
+
+
+def _is_cyrillic(token: str) -> bool:
+    return all("а" <= char <= "я" for char in token)
 
 
 def _tokens_match(left: str, right: str) -> bool:

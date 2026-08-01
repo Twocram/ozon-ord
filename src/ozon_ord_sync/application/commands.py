@@ -9,6 +9,7 @@ from ozon_ord_sync.application.contract_channel_checker import (
 from ozon_ord_sync.application.contract_reader import read_contracts_from_creative_sheet
 from ozon_ord_sync.application.invoice_payload_builder import (
     build_invoice_payload_drafts,
+    invoice_duplicate_ids,
 )
 from ozon_ord_sync.application.receipt_parser import read_receipts_from_sheet
 from ozon_ord_sync.application.sync_workflows import (
@@ -69,6 +70,7 @@ def build_document_check_invoice_payloads(
         "rowsParsed": len(drafts),
         "rowsOk": sum(1 for draft in drafts if draft.ok),
         "rowsSkipped": sum(1 for draft in drafts if draft.skip_reason),
+        "rowsAlreadyInOrd": sum(1 for draft in drafts if draft.duplicate_ids),
         "drafts": [draft.to_dict() for draft in drafts],
     }
     text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
@@ -81,7 +83,11 @@ def build_document_check_invoice_payloads(
 
 
 
-def create_extended_invoice(payload_file: str | None, send: bool) -> int:
+def create_extended_invoice(
+    payload_file: str | None,
+    send: bool,
+    force: bool = False,
+) -> int:
     if not payload_file:
         print("Error: --payload-file is required")
         return 1
@@ -96,9 +102,22 @@ def create_extended_invoice(payload_file: str | None, send: bool) -> int:
     print("Duplicate check:")
     print(json.dumps(duplicates, ensure_ascii=False, indent=2, default=str))
 
+    # The duplicate check is the last thing standing between a re-run and a second
+    # copy of the same act in ORD, so it decides whether creation happens at all.
+    duplicate_ids = invoice_duplicate_ids(duplicates)
+    if duplicate_ids and not force:
+        print(
+            f"\nАкт уже есть в ORD: {', '.join(duplicate_ids)}. "
+            "Создание отменено. Используйте --force, чтобы создать всё равно."
+        )
+        return 1
+
     if not send:
         print("\nDry run mode. Use --send to create extended invoice.")
         return 0
+
+    if duplicate_ids:
+        print(f"\n--force: создаю несмотря на дубликаты {', '.join(duplicate_ids)}")
 
     response = client.create_extended_invoice(payload)
     print("\nCreate response:")

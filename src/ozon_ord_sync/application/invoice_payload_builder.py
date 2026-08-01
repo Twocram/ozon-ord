@@ -3,12 +3,13 @@ from __future__ import annotations
 import calendar
 import re
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from ozon_ord_sync.application.contract_lookup import find_ord_contracts
 from ozon_ord_sync.application.contract_parser import ContractInfo, parse_contract_text
 from ozon_ord_sync.application.name_matching import name_contains, names_match
 from ozon_ord_sync.application.receipt_parser import (
@@ -47,6 +48,7 @@ class InvoicePayloadDraft:
     payload: dict[str, Any] | None
     skip_reason: str | None = None
     vat_note: str | None = None
+    duplicate_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -139,8 +141,10 @@ def _build_row_draft(
     payload = _payload_from_parts(row, receipt, contract, issues)
     checks = _checks(row, receipt, contract)
     issues.extend(_check_issues(checks))
+    duplicate_ids: list[str] = []
     if payload is not None and contract is not None and admin_client is not None:
         _resolve_ord_entities(payload, contract, admin_client, issues)
+        duplicate_ids = _find_duplicates(payload, admin_client, issues)
     issues.extend(_missing_payload_issues(payload, receipt))
 
     return InvoicePayloadDraft(
@@ -152,6 +156,7 @@ def _build_row_draft(
         receipt=receipt,
         contract=contract,
         payload=payload,
+        duplicate_ids=duplicate_ids,
         # VAT never blocks the row: it only asks for a note in «Проверка».
         vat_note=vat_check_note(
             contract.text if contract else "",
@@ -250,22 +255,14 @@ def _resolve_ord_entities(
     if not contract.contract_number:
         return
 
-    response = admin_client.list_contracts(
-        {
-            "pageSize": 100,
-            "orderBy": "ASC",
-            "contractNumber": contract.contract_number,
-        }
+    matches, truncated = find_ord_contracts(
+        admin_client,
+        contract.contract_number,
+        contract.contract_date,
+        contract.performer_name,
     )
-    matches = [
-        item
-        for item in response.get("contract", [])
-        if _same_contract_number(item.get("contractNumber"), contract.contract_number)
-        and (
-            contract.contract_date is None
-            or item.get("contractDate") == contract.contract_date.isoformat()
-        )
-    ]
+    if truncated:
+        issues.append(truncated)
     if len(matches) != 1:
         issues.append(
             f"ORD contract matches: {len(matches)} for {contract.contract_number}"
@@ -307,6 +304,39 @@ def _resolve_ord_entities(
             for creative in creative_response.get("creative", [])
             if creative.get("id")
         ]
+
+
+def invoice_duplicate_ids(response: dict[str, Any]) -> list[str]:
+    """Invoice ids from an ORD duplicate-check answer."""
+    ids = response.get("ids")
+    return [str(value) for value in ids if value] if isinstance(ids, list) else []
+
+
+def _find_duplicates(
+    payload: dict[str, Any],
+    admin_client: AdminOzonOrdClient,
+    issues: list[str],
+) -> list[str]:
+    """Acts ORD already holds for this contract and act.
+
+    Asked while the row is still a draft, so a re-run of the sheet shows what is
+    already registered instead of offering it for a second upload. A check that
+    could not be made blocks the row as well: registering blind is what creates the
+    duplicates nobody wants to hunt down afterwards.
+    """
+    if not payload.get("contractId"):
+        return []
+
+    try:
+        response = admin_client.check_invoice_duplicates(payload)
+    except Exception as error:
+        issues.append(f"duplicate check failed: {error}")
+        return []
+
+    duplicate_ids = invoice_duplicate_ids(response)
+    if duplicate_ids:
+        issues.append(f"уже выгружен в ORD: {', '.join(duplicate_ids)}")
+    return duplicate_ids
 
 
 def _price(amount: Decimal) -> dict[str, Any]:
@@ -438,17 +468,6 @@ def _missing_payload_issues(
     } and not payload.get("performerAddress"):
         issues.append("payload missing: performerAddress")
     return issues
-
-
-def _same_contract_number(left: str | None, right: str | None) -> bool:
-    # Contract numbers are compared case- and spacing-insensitively: "ЛР-2026/4"
-    # in ORD and "лр-2026/ 4" from the PDF are the same contract.
-    key = _contract_number_key(left)
-    return bool(key) and key == _contract_number_key(right)
-
-
-def _contract_number_key(value: str | None) -> str:
-    return re.sub(r"[\s№]+", "", value or "").casefold()
 
 
 def _receipt_name_check(result: bool | None, receipt: ReceiptInfo) -> bool | None:

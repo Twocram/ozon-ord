@@ -30,6 +30,17 @@ class NamesMatchTest(unittest.TestCase):
         # OCR turned Cyrillic Е into Latin E and О into Latin O.
         self.assertTrue(names_match("ДОРОФEEВА АЛИСА МИХАЙЛOВНА", "Дорофеева Алиса Михайловна"))
 
+    def test_reads_a_whole_latin_rendered_name_back_as_cyrillic(self) -> None:
+        # A PDF font without a Unicode map printed "АКАЕВА ЕВА" as "AKAEBA EBA":
+        # every letter is a Latin look-alike, so no word mixes the two alphabets.
+        self.assertTrue(names_match("AKAEBA EBA ВИТАЛЬЕВНА", "Акаева Ева Витальевна"))
+        self.assertTrue(names_match("Акаева Ева Витальевна", "AKAEBA EBA ВИТАЛЬЕВНА"))
+        self.assertTrue(name_contains("СЗ Акаева", "AKAEBA EBA ВИТАЛЬЕВНА"))
+
+    def test_latin_look_alikes_do_not_match_a_different_person(self) -> None:
+        self.assertFalse(names_match("AKAEBA EBA ВИТАЛЬЕВНА", "Петрова Ева Витальевна"))
+        self.assertFalse(names_match("John Smith", "Иванов Иван Иванович"))
+
     def test_matches_initials_against_full_name(self) -> None:
         self.assertTrue(names_match("Иванов И.И.", "Иванов Иван Иванович"))
         self.assertTrue(names_match("Иванов И. И.", "иванов иван иванович"))

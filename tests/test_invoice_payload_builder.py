@@ -293,6 +293,7 @@ class InvoicePayloadBuilderTest(unittest.TestCase):
                 "list_admin_creatives": lambda self, query: {
                     "creative": [{"id": "4612917"}]
                 },
+                "check_invoice_duplicates": lambda self, payload: {"ids": []},
             },
         )()
 
@@ -335,6 +336,95 @@ class InvoicePayloadBuilderTest(unittest.TestCase):
             draft.payload["contracts"][0]["creatives"],
             [{"creativeId": "4612917"}],
         )
+
+
+class DuplicateCheckTest(unittest.TestCase):
+    CONTRACT_TEXT = "\n".join([
+        "Договор оказания рекламных услуг № 27042026/21",
+        "г. Москва 27 апреля 2026г.",
+        "именуемое в дальнейшем «Заказчик», и Дорофеева Алиса Михайловна, зарегистрированный",
+        "ИТОГО: 6540 руб.",
+    ])
+    RECEIPT_TEXT = "\n".join([
+        "Акт № 24 от 30 апреля 2026 г.",
+        "Исполнитель: Дорофеева Алиса Михайловна",
+    ])
+
+    def _client(self, duplicates: object):
+        return type(
+            "Client",
+            (),
+            {
+                "list_contracts": lambda self, query: {
+                    "contract": [
+                        {
+                            "id": "5469541",
+                            "contractNumber": "27042026/21",
+                            "contractDate": "2026-04-27",
+                            "organisationCustomerId": "2332078",
+                            "organisationPerformerId": "11278486",
+                            "customer": {"id": "2332078", "title": "100балльный репетитор"},
+                            "performer": {
+                                "id": "11278486",
+                                "title": "Дорофеева Алиса Михайловна",
+                                "address": "Москва",
+                            },
+                        }
+                    ]
+                },
+                "list_admin_creatives": lambda self, query: {
+                    "creative": [{"id": "4612917"}]
+                },
+                "check_invoice_duplicates": lambda self, payload: duplicates,
+            },
+        )()
+
+    def _draft(self, client):
+        with (
+            patch(
+                "ozon_ord_sync.application.invoice_payload_builder.parse_document_check_sheet",
+                return_value=([], [document_check_row()]),
+            ),
+            patch(
+                "ozon_ord_sync.application.invoice_payload_builder.download_drive_file",
+                side_effect=lambda url, target_dir: type(
+                    "Downloaded",
+                    (),
+                    {"path": target_dir / url, "content_type": "text/plain"},
+                )(),
+            ),
+            patch(
+                "ozon_ord_sync.application.invoice_payload_builder.extract_document_text",
+                side_effect=lambda path, content_type=None: (
+                    self.RECEIPT_TEXT if path.name == "receipt-url" else self.CONTRACT_TEXT
+                ),
+            ),
+        ):
+            return build_invoice_payload_drafts("sheet", admin_client=client)[0]
+
+    def test_an_act_ord_already_has_is_not_offered_again(self) -> None:
+        draft = self._draft(self._client({"ids": ["77123"]}))
+
+        self.assertEqual(draft.duplicate_ids, ["77123"])
+        self.assertIn("уже выгружен в ORD: 77123", draft.issues)
+        self.assertFalse(draft.ok)
+
+    def test_a_new_act_stays_ready(self) -> None:
+        draft = self._draft(self._client({"ids": []}))
+
+        self.assertEqual(draft.duplicate_ids, [])
+        self.assertTrue(draft.ok, draft.issues)
+
+    def test_an_unanswered_duplicate_check_blocks_the_row(self) -> None:
+        client = self._client({})
+        client.check_invoice_duplicates = lambda payload: (_ for _ in ()).throw(
+            RuntimeError("HTTP 502")
+        )
+
+        draft = self._draft(client)
+
+        self.assertIn("duplicate check failed: HTTP 502", draft.issues)
+        self.assertFalse(draft.ok)
 
 
 class NumberlessActRowTest(unittest.TestCase):
