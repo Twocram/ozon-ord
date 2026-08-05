@@ -1,176 +1,176 @@
 # ozon-ord-sync
 
-## Run API server with Docker
+`ozon-ord-sync` автоматизирует перенос данных из Google Sheets в Ozon ORD. Проект подготавливает и выгружает статистику рекламных размещений, проверяет договоры и чеки/акты, находит связанные сущности ORD и формирует акты. Ошибки документов и спорные случаи можно записывать обратно в колонку `Проверка` через Google Apps Script.
 
-1. Create env file:
+## Возможности
+
+- чтение статистики, площадок, креативов и документов из Google Sheets;
+- поиск площадок, креативов, договоров и контрагентов в ORD;
+- подготовка и отправка статистики, включая режим для браузерного расширения;
+- извлечение данных из PDF и изображений;
+- сверка ФИО, сумм, дат, типа документа и НДС;
+- проверка номера чека самозанятого и существования чека в ЛК НПД;
+- поиск дубликатов актов перед созданием;
+- отметка нескольких Telegram-каналов и ошибок документов в Google Sheets.
+
+## Требования
+
+- Python 3.9+;
+- [uv](https://docs.astral.sh/uv/) — для локального запуска;
+- ключ внешнего API Ozon ORD;
+- cookies активной сессии ORD — для admin API.
+
+OCR изображений и сканированных PDF использует Swift, Vision и PDFKit, поэтому сейчас доступен только на macOS. Текстовые PDF обрабатываются без OCR.
+
+## Установка
 
 ```bash
+git clone git@github.com:Twocram/ozon-ord.git
+cd ozon-ord
 cp .env.example .env
+uv sync --locked
 ```
 
-2. Set at least:
+Основные переменные `.env`:
 
 ```dotenv
-OZON_ORD_SYNC_API_TOKEN=change-me
 OZON_ORD_API_KEY=your_external_api_key
+OZON_ORD_COOKIE=your_browser_cookie_header
+OZON_ORD_BASE_URL=https://ord.ozon.ru
+OZON_ORD_SYNC_API_TOKEN=change-me
 ```
 
-Add `OZON_ORD_COOKIE` too if you want to send statistics through the admin endpoint.
+Для записи результатов в Google Sheets дополнительно задаются:
 
-3. Start the API server:
+```dotenv
+GOOGLE_APPS_SCRIPT_WEB_APP_URL=https://script.google.com/macros/s/your-script-id/exec
+GOOGLE_APPS_SCRIPT_TOKEN=optional_shared_secret
+```
+
+Полный список находится в [`.env.example`](.env.example).
+
+## Статистика
+
+Проверить строки и сформированные payload без отправки:
+
+```bash
+uv run ozon-ord-sync preview
+```
+
+Отправить статистику напрямую через admin API:
+
+```bash
+uv run ozon-ord-sync sync --send
+```
+
+ORD может отклонить серверную отправку с `Ozon anti-bot challenge required`. В этом случае endpoint `/api/extension/statistics/prepare` подготавливает payload, а браузерное расширение отправляет его из авторизованной вкладки ORD.
+
+Строки со значением `к/а` в колонке `Креатив` пропускаются.
+
+## Проверка документов и создание актов
+
+Просмотреть строки таблицы проверки документов:
+
+```bash
+uv run ozon-ord-sync preview-document-check
+```
+
+Извлечь данные чеков и актов:
+
+```bash
+uv run ozon-ord-sync read-document-check-receipts
+```
+
+Записать предупреждения в колонку `Проверка`:
+
+```bash
+uv run ozon-ord-sync mark-contract-channel-checks --send
+```
+
+Подготовить черновики актов:
+
+```bash
+uv run ozon-ord-sync build-document-check-invoice-payloads \
+  --output-file invoice-payloads.json
+```
+
+Проверить один payload без создания:
+
+```bash
+uv run ozon-ord-sync create-extended-invoice \
+  --payload-file invoice.json
+```
+
+Создать акт после duplicate-check:
+
+```bash
+uv run ozon-ord-sync create-extended-invoice \
+  --payload-file invoice.json \
+  --send
+```
+
+`--force` разрешает создание при найденном дубликате и должен использоваться только вручную.
+
+## Другие команды
+
+```bash
+uv run ozon-ord-sync preview-creatives
+uv run ozon-ord-sync read-creative-contracts
+uv run ozon-ord-sync preview-platforms
+uv run ozon-ord-sync sync-platforms --send
+uv run ozon-ord-sync probe-api
+uv run ozon-ord-sync --help
+```
+
+Ссылки на таблицы можно переопределить параметрами `--sheet-url`, `--creative-sheet-url` и `--document-check-sheet-url`.
+
+## Локальный API и Docker
+
+Запустить API:
 
 ```bash
 docker compose up --build api
 ```
 
-The server will be available at `http://127.0.0.1:8765`.
+Сервис будет доступен по адресу `http://127.0.0.1:8765`. Сохранённые cookies находятся в `./.runtime/ozon-cookie.json`.
 
-Cookie state is persisted in `./.runtime/ozon-cookie.json`.
-
-## Run Telegram bot with Docker
-
-The bot service uses `python-telegram-bot` and talks to the local API.
-
-Set these in `.env`:
-
-```dotenv
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-OZON_ORD_SYNC_API_TOKEN=change-me
-OZON_ORD_SYNC_API_BASE_URL=http://api:8765
-```
-
-Then start services:
-
-```bash
-docker compose up --build api bot
-```
-
-Telegram commands:
-
-- `/start` — help
-- `/set_token <OZON_ORD_COOKIE>` — save cookie
-- `/upload` — run statistics upload
-
-`/set-token` is not used because Telegram commands support underscores, not dashes.
-
-## Run on a VPS
-
-1. Install Docker and Docker Compose plugin.
-2. Clone the repo on the server:
-
-```bash
-git clone <your-repo-url>
-cd ozon-ord
-```
-
-3. Create `.env`:
-
-```bash
-cp .env.example .env
-```
-
-4. Fill at least these values:
-
-```dotenv
-OZON_ORD_SYNC_API_TOKEN=some-long-random-string
-OZON_ORD_SYNC_API_BASE_URL=http://api:8765
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-OZON_ORD_API_KEY=your_external_api_key
-```
-
-5. Start services in background:
-
-```bash
-docker compose up -d --build api bot
-```
-
-6. Check logs:
-
-```bash
-docker compose logs -f api bot
-```
-
-Useful commands:
-
-```bash
-docker compose ps
-docker compose restart bot
-docker compose restart api
-docker compose up -d --build
-```
-
-Notes:
-- bot works only while `bot` container is running
-- saved cookie is persisted in `./.runtime/ozon-cookie.json`
-- if you do not need public API access on the VPS, bind port `8765` to localhost only
-
-## CI/CD to VPS
-
-The repo now has two GitHub Actions workflows:
-
-- `CI` — lint, tests, build
-- `Deploy` — runs after successful `CI` on `main` and updates the VPS over SSH
-
-### What happens on deploy
-
-On every push to `main`:
-
-1. GitHub Actions waits for `CI` to pass
-2. connects to your VPS over SSH
-3. runs:
-
-```bash
-cd <deploy-path>
-git fetch origin
-git checkout main
-git reset --hard origin/main
-# deploy script uses docker compose if available, otherwise docker-compose
-$COMPOSE rm -sf api bot || true
-$COMPOSE up -d --build --remove-orphans api bot
-docker image prune -f
-```
-
-### GitHub secrets to add
-
-In GitHub repo settings -> `Secrets and variables` -> `Actions`, add:
-
-- `DEPLOY_HOST` — VPS IP or domain
-- `DEPLOY_PORT` — SSH port, usually `22`
-- `DEPLOY_USER` — SSH user on VPS
-- `DEPLOY_SSH_KEY` — private SSH key for that user
-- `DEPLOY_PATH` — absolute path to project on VPS, for example `/home/deploy/ozon-ord`
-
-### One-time VPS preparation for deploys
-
-1. Make sure the repo is already cloned into `DEPLOY_PATH`
-2. Make sure `.env` exists there
-3. Make sure `git fetch origin` works on the server
-
-Check it manually on the VPS:
-
-```bash
-cd /home/deploy/ozon-ord
-git fetch origin
-# new Compose plugin:
-docker compose up -d --build api bot
-
-# old Compose binary:
-docker-compose up -d --build api bot
-```
-
-If the repo is private, configure SSH deploy key or another git auth method on the VPS first.
-
-### Manual redeploy
-
-You can also run the `Deploy` workflow manually from the GitHub Actions tab with `workflow_dispatch`.
-
-## Useful API endpoints
+Основные endpoints:
 
 - `GET /api/status`
 - `POST /api/auth/ozon-cookie`
 - `POST /api/auth/validate`
 - `POST /api/extension/statistics/prepare`
 - `POST /api/preview/statistics`
+- `POST /api/preview/document-check`
 - `POST /api/preview/platforms`
 - `POST /api/sync/statistics`
 - `POST /api/sync/platforms`
+
+## Развёртывание
+
+Для запуска API на VPS:
+
+```bash
+cp .env.example .env
+# заполнить .env
+docker compose up -d --build api
+docker compose logs -f api
+```
+
+Workflow `Deploy` запускается после успешного CI в `main`. Для него нужны GitHub secrets:
+
+- `DEPLOY_HOST`
+- `DEPLOY_PORT`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PATH`
+
+## Проверки
+
+```bash
+uvx ruff check .
+uv run python -m unittest discover -s tests -q
+uv build
+```
+
+Описание слоёв проекта находится в [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), настройка Google Apps Script — в [`APPS_SCRIPT.md`](APPS_SCRIPT.md).
