@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from ozon_ord_sync.application.contract_lookup import find_ord_contracts
-from ozon_ord_sync.application.contract_parser import ContractInfo, parse_contract_text
+from ozon_ord_sync.application.contract_parser import (
+    PERFORMER_NAME_FROM_SHAPE,
+    ContractInfo,
+    parse_contract_text,
+)
 from ozon_ord_sync.application.name_matching import name_contains, names_match
 from ozon_ord_sync.application.receipt_parser import (
     CONFIDENCE_HIGH,
@@ -405,19 +409,23 @@ def _checks(
         else receipt.total_amount == contract.total_amount,
         "receipt_contract_name": None
         if receipt is None or contract is None
-        else _receipt_name_check(
+        else _name_check(
             names_match(receipt.seller_name, contract.performer_name),
-            receipt,
+            receipt=receipt,
+            contract=contract,
         ),
         "sheet_receipt_name": None
         if receipt is None
-        else _receipt_name_check(
+        else _name_check(
             name_contains(row.counterparty, receipt.seller_name),
-            receipt,
+            receipt=receipt,
         ),
         "sheet_contract_name": None
         if contract is None
-        else name_contains(row.counterparty, contract.performer_name),
+        else _name_check(
+            name_contains(row.counterparty, contract.performer_name),
+            contract=contract,
+        ),
         "contract_receipt_document_type": None
         if contract is None or receipt is None
         else document_type_matches(
@@ -470,9 +478,21 @@ def _missing_payload_issues(
     return issues
 
 
-def _receipt_name_check(result: bool | None, receipt: ReceiptInfo) -> bool | None:
-    # A ФИО pulled out of a receipt by shape alone (no label, no patronymic) is a
-    # guess: report a mismatch as "unknown" instead of failing the row.
-    if result is False and receipt.seller_name_confidence != CONFIDENCE_HIGH:
+def _name_check(
+    result: bool | None,
+    receipt: ReceiptInfo | None = None,
+    contract: ContractInfo | None = None,
+) -> bool | None:
+    """A mismatch counts only when both ФИО were read confidently.
+
+    A name pulled out of a receipt by shape alone, or out of a scanned contract
+    whose template wording OCR mangled, is a guess — report the mismatch as
+    "unknown" instead of holding the row back on it.
+    """
+    if result is not False:
+        return result
+    if receipt is not None and receipt.seller_name_confidence != CONFIDENCE_HIGH:
+        return None
+    if contract is not None and contract.performer_name_source == PERFORMER_NAME_FROM_SHAPE:
         return None
     return result

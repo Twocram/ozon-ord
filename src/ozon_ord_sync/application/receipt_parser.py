@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
-from itertools import islice
+from itertools import chain, combinations, islice
 from pathlib import Path
 from typing import Any
 
@@ -432,7 +432,7 @@ def resolve_receipt_id(
     inn: str,
     receipt_id: str,
     exists: Callable[[str, str], bool | None] | None = None,
-    max_probes: int = 24,
+    max_probes: int = 48,
 ) -> tuple[str | None, bool]:
     """The reading ЛК НПД confirms, and whether ЛК НПД answered at all.
 
@@ -451,14 +451,38 @@ def resolve_receipt_id(
 
 
 def receipt_id_candidates(receipt_id: str) -> Iterator[str]:
-    """The id as read, then readings with one and two characters swapped."""
+    """The id as read, then the readings OCR is most likely to have produced.
+
+    A font renders a character the same way everywhere it appears, so a misread is
+    usually systematic: both ones of "203x109k10" are really the letter l. The
+    guesses therefore start by applying one confusion to every occurrence at once,
+    and only then move on to single characters and pairs of them.
+    """
     seen = {receipt_id}
     yield receipt_id
-    for distance in (1, 2):
-        for candidate in _swapped(receipt_id, distance):
-            if candidate not in seen:
-                seen.add(candidate)
-                yield candidate
+    for candidate in chain(
+        _consistently_swapped(receipt_id, 1),
+        _swapped(receipt_id, 1),
+        _consistently_swapped(receipt_id, 2),
+        _swapped(receipt_id, 2),
+    ):
+        if candidate not in seen:
+            seen.add(candidate)
+            yield candidate
+
+
+def _consistently_swapped(value: str, rules: int) -> Iterator[str]:
+    """Readings where `rules` confusions are applied to every occurrence at once."""
+    options = [
+        (char, replacement)
+        for char in dict.fromkeys(value)
+        for replacement in _CONFUSABLE.get(char, "")
+    ]
+    for combination in combinations(options, rules):
+        # One character cannot be read as two different ones at the same time.
+        if len({char for char, _ in combination}) != rules:
+            continue
+        yield value.translate(str.maketrans(dict(combination)))
 
 
 def _swapped(value: str, distance: int) -> Iterator[str]:

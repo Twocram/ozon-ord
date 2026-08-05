@@ -5,12 +5,41 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from ozon_ord_sync.application.receipt_parser import (
+    CONFIDENCE_HIGH,
+    extract_person_name,
+)
 from ozon_ord_sync.application.sheet_parser import parse_decimal
 
 LEGAL_TYPE_ENTREPRENEUR = "LEGAL_TYPE_ENTREPRENEUR"
 LEGAL_TYPE_INDIVIDUAL = "LEGAL_TYPE_INDIVIDUAL"
 PERFORMER_STATUS_ENTREPRENEUR = "entrepreneur"
 PERFORMER_STATUS_SELF_EMPLOYED = "self_employed"
+PERFORMER_NAME_FROM_TEMPLATE = "template"
+PERFORMER_NAME_FROM_SHAPE = "ocr_shape"
+
+# The contract heading. OCR of a scanned contract prints the № sign as "Nº" / "No"
+# / "N°", so all of those count.
+_CONTRACT_HEADING_RE = re.compile(
+    r"Договор[^\n]{0,80}?(?:№|N[ºo°]|номер)\s*([^\s\n]+)",
+    re.IGNORECASE,
+)
+_DATE_WINDOW = 200  # characters after the heading that still belong to it
+
+_MONTHS_GENITIVE = {
+    "января": 1,
+    "февраля": 2,
+    "марта": 3,
+    "апреля": 4,
+    "мая": 5,
+    "июня": 6,
+    "июля": 7,
+    "августа": 8,
+    "сентября": 9,
+    "октября": 10,
+    "ноября": 11,
+    "декабря": 12,
+}
 
 _ADDRESS_LABEL = re.compile(
     r"^(Юр\.?\s*адрес|Юридический\s+адрес|Адрес)\s*:\s*(.*)$",
@@ -37,22 +66,30 @@ class ContractInfo:
     performer_address: str | None
     total_amount: Decimal | None
     text: str
+    performer_name_source: str | None = None
 
 
 def parse_contract_text(text: str) -> ContractInfo:
+    performer_name, performer_name_source = _parse_performer_name(text)
     return ContractInfo(
-        contract_number=_first_match(r"Договор[^№\n]*№\s*([^\s\n]+)", text),
+        contract_number=_parse_contract_number(text),
         contract_date=_parse_contract_date(text),
         customer_name=_parse_customer_name(text),
         customer_inn=_parse_customer_inn(text),
-        performer_name=_parse_performer_name(text),
+        performer_name=performer_name,
         performer_inn=_parse_performer_inn(text),
         performer_legal_type=_parse_performer_legal_type(text),
         performer_status=_parse_performer_status(text),
         performer_address=_parse_performer_address(text),
         total_amount=_parse_contract_amount(text),
         text=text,
+        performer_name_source=performer_name_source,
     )
+
+
+def _parse_contract_number(text: str) -> str | None:
+    match = _CONTRACT_HEADING_RE.search(text)
+    return match.group(1).strip() if match else None
 
 
 def _parse_customer_inn(text: str) -> str | None:
@@ -159,36 +196,52 @@ def _requisites_section(text: str) -> str:
 
 
 def _parse_contract_date(text: str) -> date | None:
-    months = {
-        "января": 1,
-        "февраля": 2,
-        "марта": 3,
-        "апреля": 4,
-        "мая": 5,
-        "июня": 6,
-        "июля": 7,
-        "августа": 8,
-        "сентября": 9,
-        "октября": 10,
-        "ноября": 11,
-        "декабря": 12,
-    }
-    match = re.search(
+    """The date printed with the contract heading, not the first date in the file.
+
+    A «Договор» file is sometimes a bundle: a счёт на оплату of its own date
+    ("Счет на оплату Nº 5 от 12 июня 2026 г.") and only then the contract, dated
+    four days earlier. Reading the first date in such a file dates the contract by
+    the счёт — and ORD then does not recognise it.
+    """
+    heading = _CONTRACT_HEADING_RE.search(text)
+    if heading:
+        near_heading = _find_date(
+            text[heading.start() : heading.end() + _DATE_WINDOW]
+        )
+        if near_heading is not None:
+            return near_heading
+    return _find_date(text)
+
+
+def _find_date(text: str) -> date | None:
+    """The first date in `text`, written either with a month name or in digits."""
+    for match in re.finditer(
         r"(?:\b|[«„“\"])(\d{1,2})[»”\"]?\s+([а-яё]+)\s+(\d{4})\s*г?\.?",
         text,
         flags=re.IGNORECASE,
-    )
-    if match:
-        day = int(match.group(1))
-        month = months.get(match.group(2).casefold())
-        if month is not None:
-            return date(int(match.group(3)), month, day)
+    ):
+        month = _MONTHS_GENITIVE.get(match.group(2).casefold())
+        if month is None:
+            continue
+        parsed = _build_date(int(match.group(3)), month, int(match.group(1)))
+        if parsed is not None:
+            return parsed
 
-    numeric = re.search(r"(?:от\s*)?(\d{2})\.(\d{2})\.(\d{4})\b", text)
-    if numeric:
-        day, month, year = map(int, numeric.groups())
-        return date(year, month, day)
+    # Two-digit years are as common as four ("от 08.06.26"), and a clause number
+    # can look like a date ("п. 1.13.2026"), so every candidate is validated.
+    for match in re.finditer(r"(?:от\s*)?(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b", text):
+        day, month, year = map(int, match.groups())
+        parsed = _build_date(year + 2000 if year < 100 else year, month, day)
+        if parsed is not None:
+            return parsed
     return None
+
+
+def _build_date(year: int, month: int, day: int) -> date | None:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
 
 
 def _parse_customer_name(text: str) -> str | None:
@@ -196,7 +249,8 @@ def _parse_customer_name(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _parse_performer_name(text: str) -> str | None:
+def _parse_performer_name(text: str) -> tuple[str | None, str | None]:
+    """The performer ФИО and where it came from — a template or the ФИО shape."""
     collapsed = re.sub(r"\s+", " ", text)
 
     # ИП: "Индивидуальный предприниматель <Фамилия Имя Отчество>". ORD stores the bare
@@ -207,7 +261,7 @@ def _parse_performer_name(text: str) -> str | None:
         collapsed,
     )
     if match:
-        return match.group(1).strip()
+        return match.group(1).strip(), PERFORMER_NAME_FROM_TEMPLATE
 
     # Other templates: "... «Заказчик», и <name>, зарегистрирован|являющ".
     match = re.search(
@@ -215,7 +269,17 @@ def _parse_performer_name(text: str) -> str | None:
         collapsed,
         flags=re.IGNORECASE,
     )
-    return match.group(1).strip() if match else None
+    if match:
+        return match.group(1).strip(), PERFORMER_NAME_FROM_TEMPLATE
+
+    # A contract scanned into a PDF is read by OCR, which mangles the template
+    # wording — but the signature block still carries a clean ФИО under the
+    # "Самозанятый" / "Исполнитель" label. Marked as a guess so that a failed name
+    # check on it is reported as "unknown" instead of holding the row back.
+    name, confidence = extract_person_name(text)
+    if name and confidence == CONFIDENCE_HIGH:
+        return name, PERFORMER_NAME_FROM_SHAPE
+    return None, None
 
 
 def _parse_contract_amount(text: str) -> Decimal | None:

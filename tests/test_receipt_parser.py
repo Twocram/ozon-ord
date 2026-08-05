@@ -4,6 +4,7 @@ import sys
 import unittest
 from datetime import datetime
 from decimal import Decimal
+from itertools import islice
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +19,7 @@ from ozon_ord_sync.application.receipt_parser import (
     extract_person_name,
     is_numberless_act_form,
     parse_receipt_text,
+    receipt_id_candidates,
     resolve_receipt_id,
     self_employed_receipt_number_error,
     self_employed_receipt_number_is_valid,
@@ -318,6 +320,28 @@ class ReceiptIdVerificationTest(unittest.TestCase):
 
         self.assertEqual((confirmed, answered), ("204qno6rie", True))
         self.assertEqual(probes[0], "204qnobrie")
+
+    def test_tries_a_systematic_misread_before_single_characters(self) -> None:
+        # A font renders l as 1 everywhere it appears, so both ones of
+        # "203x109k10" are really the letter l — that reading has to come early.
+        candidates = list(islice(receipt_id_candidates("203x109k10"), 8))
+
+        self.assertEqual(candidates[0], "203x109k10")
+        self.assertIn("203xl09kl0", candidates)
+
+    def test_resolves_a_misread_repeated_twice(self) -> None:
+        probes: list[str] = []
+
+        def exists(inn: str, receipt_id: str) -> bool:
+            probes.append(receipt_id)
+            return receipt_id == "203xl09kl0"
+
+        confirmed, answered = resolve_receipt_id(
+            "231215332411", "203x109k10", exists=exists
+        )
+
+        self.assertEqual((confirmed, answered), ("203xl09kl0", True))
+        self.assertLessEqual(len(probes), 8)
 
     def test_keeps_the_reading_when_lknpd_is_unreachable(self) -> None:
         self.assertEqual(

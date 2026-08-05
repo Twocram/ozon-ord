@@ -35,6 +35,33 @@ class ContractParserTest(unittest.TestCase):
         self.assertEqual(contract.performer_name, "Дорофеева Алиса Михайловна")
         self.assertEqual(contract.total_amount, Decimal("6540"))
 
+    def test_reads_the_number_and_date_of_a_scanned_contract(self) -> None:
+        # OCR prints № as Nº, and the file is a bundle: a счёт на оплату of its own
+        # date comes first, the contract itself four days earlier.
+        contract = parse_contract_text(
+            "\n".join(
+                [
+                    "Счет на оплату Nº 5 от 12 июня 2026 г.",
+                    "Рекламные услуги в личном блоге блогера по Договору Nº",
+                    "08062026/3 от 08.06.26",
+                    "Итого: 10 500,00",
+                    "Договор оказания рекламных услуг Nº 08062026/3",
+                    "Москва",
+                    "8 июня 2026г.",
+                ]
+            )
+        )
+
+        self.assertEqual(contract.contract_number, "08062026/3")
+        self.assertEqual(contract.contract_date, date(2026, 6, 8))
+
+    def test_ignores_a_clause_number_that_looks_like_a_date(self) -> None:
+        contract = parse_contract_text(
+            "Договор № 5\nп. 1.13.2026 настоящего Договора\nг. Москва 08.06.2026"
+        )
+
+        self.assertEqual(contract.contract_date, date(2026, 6, 8))
+
     def test_extracts_quoted_contract_date_before_later_dates(self) -> None:
         contract = parse_contract_text(
             "г. Москва «11» мая 2026 г.\nДата регистрации: 28 декабря 2024 г."
